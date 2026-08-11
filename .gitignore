@@ -28,3 +28,9 @@ yarn-error.log*
 # IDE / Editor
 .vscode/
 .idea/
+
+.claude/
+
+cloud-sql-proxy.x64.exe
+Mô_Tả_Website_v0.1 on Thu 18 Jun.pdf
+Supplement.jpg
