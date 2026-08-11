@@ -1,5 +1,3 @@
-/.agents
-/.codex
 /Mô_Tả_Website_v0.1 on Thu 18 Jun.pdf
 /plan.md
 /Website Quản lý Khóa học.md
@@ -40,7 +38,6 @@ yarn-error.log*
 .vscode/
 .idea/
 
-.claude/
 
 cloud-sql-proxy.x64.exe
 Mô_Tả_Website_v0.1 on Thu 18 Jun.pdf
