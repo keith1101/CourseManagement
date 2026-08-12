@@ -37,11 +37,7 @@ pnpm db:studio
 
 ## Endpoints
 
-```text
-GET    /api/health
-GET    /api/courses
-GET    /api/courses/:id
-POST   /api/courses
-PATCH  /api/courses/:id
-DELETE /api/courses/:id
+```Auth
+POST /api/auth/register
+POST /api/auth/login
 ```

@@ -26,6 +26,7 @@ model User {
   email        String    @unique
   passwordHash String
   fullName     String?
+  
   role         UserRole  @default(STUDENT)
   isActive     Boolean   @default(true)
   isPro        Boolean   @default(false)
