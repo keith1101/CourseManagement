@@ -7,10 +7,13 @@ async function bootstrap() {
   const port = Number(process.env.PORT ?? 5001);
 
   app.enableCors();
+  
   app.setGlobalPrefix('api');
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
     }),
   );

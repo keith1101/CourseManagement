@@ -7,30 +7,214 @@ datasource db {
   provider = "postgresql"
 }
 
-model Course {
-  id          Int      @id @default(autoincrement())
-  title       String
-  description String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  isActive    Boolean  @default(true)
-}
-
 enum UserRole {
   ADMIN
   STUDENT
 }
 
-model User {
-  id           Int       @id @default(autoincrement())
-  email        String    @unique
-  passwordHash String
-  fullName     String?
-  role         UserRole  @default(STUDENT)
-  isActive     Boolean   @default(true)
-  isPro        Boolean   @default(false)
-  proExpiresAt DateTime?
+enum AccessLevel {
+  FREE
+  PRO
+}
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+enum MaterialType {
+  PDF
+  DOCX
+  EMBEDDED_VIDEO
+}
+
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  SHORT_ANSWER
+}
+
+enum AnswerValueType {
+  TEXT
+  NUMBER
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  password    String
+  role        UserRole  @default(STUDENT)
+  isLocked    Boolean   @default(false)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  subscriptions   Subscription[]
+  examAssignments ExamAssignment[]
+  examAttempts    ExamAttempt[]
+}
+
+model Subscription {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  startedAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Subject {
+  id           String   @id @default(uuid())
+  code         String   @unique
+  name         String
+  description  String?
+  displayOrder Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  materials Material[]
+}
+
+model Material {
+  id               String       @id @default(uuid())
+  subjectId        String
+  subject          Subject      @relation(fields: [subjectId], references: [id])
+  title            String
+  materialType     MaterialType
+  storageUrl       String?
+  embedUrl         String?
+  originalFileName String?
+  mimeType         String?
+  fileSizeBytes    Int?
+  accessLevel      AccessLevel
+  isPublished      Boolean      @default(false)
+  publishedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model Exam {
+  id           String      @id @default(uuid())
+  title        String
+  description  String?
+  status       ExamStatus  @default(DRAFT)
+  accessLevel  AccessLevel @default(FREE)
+  displayOrder Int         @default(0)
+  publishedAt  DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  questions       Question[]
+  examAssignments ExamAssignment[]
+  examAttempts    ExamAttempt[]
+}
+
+model Question {
+  id                String       @id @default(uuid())
+  examId            String
+  exam              Exam         @relation(fields: [examId], references: [id])
+  questionType      QuestionType
+  contentText       String
+  imageUrl          String?
+  instruction       String?
+  explaination      String?
+  timeLimitSeconds  Int
+  correctTextAnswer String?
+  position          Int
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+
+  questionOptions         QuestionOption[]
+  questionAcceptedAnswers QuestionAcceptedAnswer[]
+  attemptAnswers          AttemptAnswer[]
+}
+
+model QuestionOption {
+  id          String   @id @default(uuid())
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id])
+  contentText String
+  isCorrect   Boolean  @default(false)
+  position    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attemptAnswers AttemptAnswer[]
+}
+
+model QuestionAcceptedAnswer {
+  id             String          @id @default(uuid())
+  questionId     String
+  question       Question        @relation(fields: [questionId], references: [id])
+  answerType     AnswerValueType
+  rawValue       String
+  isPrimary      Boolean         @default(false)
+  normalizedText String?
+  content        String?
+  isCorrect      Boolean         @default(false)
+  position       Int
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  numericValue   Float?
+}
+
+model ExamAssignment {
+  id           String        @id @default(uuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id])
+  examId       String
+  exam         Exam          @relation(fields: [examId], references: [id])
+  assignedAt   DateTime      @default(now())
+  dueAt        DateTime
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  examAttempts ExamAttempt[]
+}
+
+model ExamAttempt {
+  id             String          @id @default(uuid())
+  userId         String
+  user           User            @relation(fields: [userId], references: [id])
+  examId         String
+  exam           Exam            @relation(fields: [examId], references: [id])
+  assignmentId   String?
+  assignment     ExamAssignment? @relation(fields: [assignmentId], references: [id])
+  status         AttemptStatus   @default(IN_PROGRESS)
+  submittedAt    DateTime?
+  correctCount   Int             @default(0)
+  totalQuestions Int
+  startedAt      DateTime        @default(now())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  attemptedAnswers AttemptAnswer[]
+}
+
+model AttemptAnswer {
+  id               String          @id @default(uuid())
+  attemptId        String
+  examAttempt      ExamAttempt     @relation(fields: [attemptId], references: [id])
+  questionId       String
+  question         Question        @relation(fields: [questionId], references: [id])
+  selectedOptionId String
+  selectedOption   QuestionOption  @relation(fields: [selectedOptionId], references: [id])
+  answerType       AnswerValueType
+  rawValue         String
+  normalizedText   String?
+  content          String?
+  isCorrect        Boolean         @default(false)
+  position         Int
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  numericValue     Float?
 }
