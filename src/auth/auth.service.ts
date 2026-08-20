@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
-
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 
 @Injectable()
@@ -66,7 +66,7 @@ export class AuthService {
         const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
         
         if (!isPasswordValid) {
-            throw new UnauthorizedException('Invalid email or password');
+            throw new UnauthorizedException('Invalid email or password');   
         }
 
         const payload = {
@@ -88,6 +88,72 @@ export class AuthService {
                 proExpiresAt: user.proExpiresAt,
             },
         };  
+    }
+
+    async getMe(userId: number) {
+
+        const user = await this.prisma.user.findUnique ({
+            where: {
+                id: userId,
+            },
+            select: {
+                id: true,
+                email: true,
+                fullName: true,
+                role: true,
+                isActive: true,
+                isPro: true,
+                proExpiresAt: true,
+                createdAt: true,
+                updatedAt: true,
+            }
+        })
+
+        if (!user) {
+            throw new UnauthorizedException('User not found!');
+        }
+        return user;
+    }
+
+    async changePassword (
+        userId: number,
+        changePasswordDto: ChangePasswordDto,
+    ) {
+        const { oldPassword, newPassword } = changePasswordDto;
+
+        const user = await this.prisma.user.findUnique({
+            where: {
+                id: userId,
+            },
+        });
+
+        if(!user) {
+            throw new UnauthorizedException('User not found');
+        }
+
+        const isOldPasswordValid = await bcrypt.compare(
+            oldPassword,
+            user.passwordHash,
+        );
+
+        if (!isOldPasswordValid) {
+            throw new UnauthorizedException('Old password is incorrect');
+        }
+
+        const newPasswordHash = await bcrypt.hash(newPassword, 10);
+        await this.prisma.user.update({
+            where: {
+                id: userId,
+            },
+            data: {
+                passwordHash: newPasswordHash,
+            },
+        });
+
+        return {
+            message: 'Password changed successfully',
+        };
+
     }
 
 }
