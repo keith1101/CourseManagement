@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
-import { CoursesModule } from './courses/courses.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
+import { UsersModule } from './users/users.module';
+import { QuestionsModule } from './questions/questions.module';
+import { ExamQuestionsController } from './questions/exam-questions.controller';
 
 @Module({
   imports: [
@@ -11,9 +13,10 @@ import { AuthModule } from './auth/auth.module';
       isGlobal: true,
     }),
     PrismaModule,
-    CoursesModule,
     AuthModule,
+    UsersModule,
+    QuestionsModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, ExamQuestionsController],
 })
 export class AppModule {}

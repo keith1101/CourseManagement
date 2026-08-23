@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
+import { UsersService } from '../users/users.service';
 
 
 
@@ -12,14 +13,13 @@ export class AuthService {
     constructor (
         private readonly prisma: PrismaService,
         private readonly jwtService: JwtService,
+        private readonly usersService: UsersService
     ) {}
 
     async register(registerDto : RegisterDto) {
         const { email, password, fullName } = registerDto;
 
-        const existingUser = await this.prisma.user.findUnique({
-            where: { email },
-        });
+        const existingUser = await this.usersService.findByEmail(email);
 
         if (existingUser) {
             throw new ConflictException('Email already exists');
@@ -39,7 +39,7 @@ export class AuthService {
                 fullName: true,
                 role: true,
                 isActive: true,
-                isPro: true,
+                accessLevel: true,
                 proExpiresAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -84,7 +84,7 @@ export class AuthService {
                 fullName: user.fullName,
                 role: user.role,
                 isActive: user.isActive,
-                isPro: user.isPro,
+                accessLevel: user.accessLevel,
                 proExpiresAt: user.proExpiresAt,
             },
         };  

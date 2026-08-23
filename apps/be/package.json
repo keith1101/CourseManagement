@@ -15,7 +15,9 @@
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
     "db:validate": "prisma validate",
-    "prebuild": "pnpm db:generate"
+    "prebuild": "pnpm db:generate",
+    "test": "jest",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",
@@ -34,9 +36,16 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/testing": "^11.1.29",
+    "@types/bcrypt": "^6.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/mocha": "^10.0.10",
     "@types/node": "^22.10.0",
     "@types/pg": "^8.11.10",
+    "jest": "^30.4.2",
     "prisma": "^7.6.0",
+    "ts-jest": "^29.4.12",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.0"
