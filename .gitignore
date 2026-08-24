@@ -8,12 +8,17 @@ coverage/
 
 # Environment variables
 .env
+.env.*
 .env.local
 .env.*.local
+!.env.example
 
 # Prisma generated client
 /generated/
 generated/
+
+# Local binaries
+cloud-sql-proxy
 
 # Logs
 *.log
