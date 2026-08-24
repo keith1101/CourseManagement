@@ -3,22 +3,22 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { JwtModule } from '@nestjs/jwt';
-import { UsersModule } from '../users/users.module';
-import { UsersService } from '../users/users.service';
+import { JwtStrategy } from './jwt.strategy';
 
 
 @Module({
   imports: [
     PrismaModule, 
     JwtModule.register({
-      secret: process.env.JWT_SECRET,
+      secret: process.env.JWT_SECRET || 'super_secret_jwt_key_course_management_2026',
       signOptions: {
         expiresIn: '1d',
       },
     }),
-    UsersModule,
   ],
   controllers: [AuthController],
-  providers: [AuthService, UsersService],
+  providers: [AuthService, JwtStrategy],
 })
 export class AuthModule {}
+
+
