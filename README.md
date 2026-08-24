@@ -46,8 +46,8 @@ Auth module xử lý đăng ký, đăng nhập, xác thực người dùng và q
 | ------ | ----------------------- | --------------------------------------- | ------------- | ---------- |
 | POST   | `/auth/register`        | Đăng ký tài khoản học sinh              | Public        | Done       |
 | POST   | `/auth/login`           | Đăng nhập và nhận access token          | Public        | Done       |
-| GET    | `/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Done    |
-| PATCH  | `/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Planned    |
+| GET    | `/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Done       |
+| PATCH  | `/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Done       |
 
 ## 2. Users Module
 
