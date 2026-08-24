@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsOptional, IsInt } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Min, IsInt } from "class-validator";
 
 export class CreateSubjectDto {
 
@@ -15,7 +15,6 @@ export class CreateSubjectDto {
     description?: string;
 
     @IsInt()
-    @IsOptional()
-    displayOrder?: number;
-
+    @Min(0)
+    displayOrder!: number;
 }
