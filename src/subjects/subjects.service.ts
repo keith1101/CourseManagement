@@ -21,7 +21,7 @@ export class SubjectsService {
         });
     }
 
-    async findOne(id: number) {
+    async findOne(id: string) {
         const subject = await this.prisma.subject.findUnique({
             where: {
                 id: id,
@@ -34,14 +34,14 @@ export class SubjectsService {
         return subject;
     }
 
-    async update(id: number, updateSubjectDto: UpdateSubjectDto) {
+    async update(id: string, updateSubjectDto: UpdateSubjectDto) {
         return this.prisma.subject.update ({
             where: { id },
             data: updateSubjectDto,
         });
     }
 
-    async remove(id: number) {
+    async remove(id: string) {
         return this.prisma.subject.update ({
             where: { id },
             data: {

@@ -20,7 +20,7 @@ export class SubjectsController {
 
     @Get(':id')
     findOne(@Param('id') id: string) {
-        return this.subjectsService.findOne(+id);
+        return this.subjectsService.findOne(id);
     }
     
     @Patch(':id')
@@ -28,14 +28,14 @@ export class SubjectsController {
         @Param('id') id: string,
         @Body() updateSubjectDto: UpdateSubjectDto,
     ) {
-        return this.subjectsService.update(+id, updateSubjectDto);
+        return this.subjectsService.update(id, updateSubjectDto);
     }
 
     @Delete(':id')
     remove (
         @Param('id') id: string,
     ) {
-        return this.subjectsService.remove(+id);
+        return this.subjectsService.remove(id);
     }
     
 }

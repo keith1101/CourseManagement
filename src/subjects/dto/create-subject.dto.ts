@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsOptional } from "class-validator";
+import { IsNotEmpty, IsString, IsOptional, Min, IsInt } from "class-validator";
 
 export class CreateSubjectDto {
 
@@ -14,4 +14,7 @@ export class CreateSubjectDto {
     @IsOptional()
     description?: string;
 
+    @IsInt()
+    @Min(0)
+    displayOrder!: number;
 }
