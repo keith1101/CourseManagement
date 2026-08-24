@@ -46,8 +46,8 @@ Auth module xử lý đăng ký, đăng nhập, xác thực người dùng và q
 | ------ | ----------------------- | --------------------------------------- | ------------- | ---------- |
 | POST   | `/auth/register`        | Đăng ký tài khoản học sinh              | Public        | Done       |
 | POST   | `/auth/login`           | Đăng nhập và nhận access token          | Public        | Done       |
-| GET    | `/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Planned    |
-| PATCH  | `/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Planned    |
+| GET    | `/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Done       |
+| PATCH  | `/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Done       |
 
 ## 2. Users Module
 
@@ -60,8 +60,7 @@ Users module cho phép Admin quản lý tài khoản học sinh.
 | PATCH  | `/users/:id`        | Cập nhật thông tin học sinh   | Admin | Planned    |
 | PATCH  | `/users/:id/lock`   | Khóa tài khoản                | Admin | Planned    |
 | PATCH  | `/users/:id/unlock` | Mở khóa tài khoản             | Admin | Planned    |
-| PATCH  | `/users/:id/pro`    | Cập nhật tài khoản Pro        | Admin | Planned    |
-| PATCH  | `/users/:id/free`   | Cập nhật tài khoản Thường     | Admin | Planned    |
+| PATCH  | `/users/:id/pro`    | Cập nhật tài khoản Thường/Pro | Admin | Planned    |
 Hỗ trợ tìm kiếm học sinh:
 
 `GET /users?search=...`

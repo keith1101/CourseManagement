@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { QuestionsModule } from './questions/questions.module';
 import { ExamQuestionsController } from './questions/exam-questions.controller';
+import { SubjectsModule } from './subjects/subjects.module';
 
 @Module({
   imports: [
@@ -16,7 +17,9 @@ import { ExamQuestionsController } from './questions/exam-questions.controller';
     AuthModule,
     UsersModule,
     QuestionsModule,
+    SubjectsModule,
   ],
   controllers: [AppController, ExamQuestionsController],
 })
-export class AppModule {}
+export class AppModule { }
+

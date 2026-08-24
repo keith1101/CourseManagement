@@ -6,7 +6,6 @@ import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
 import { ChangePasswordDto } from './dto/change-password.dto';
 
-
 @Injectable()
 export class AuthService {
     constructor (
@@ -31,7 +30,9 @@ export class AuthService {
             data: {
                 email,
                 passwordHash,
-                fullName,
+                fullName: fullName ?? '',
+                phone: '',
+                dateOfBirth: new Date(),
             },
             select: {
                 id: true,
@@ -39,7 +40,7 @@ export class AuthService {
                 fullName: true,
                 role: true,
                 isActive: true,
-                isPro: true,
+                accessLevel: true,
                 proExpiresAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -84,13 +85,13 @@ export class AuthService {
                 fullName: user.fullName,
                 role: user.role,
                 isActive: user.isActive,
-                isPro: user.isPro,
+                accessLevel: user.accessLevel,
                 proExpiresAt: user.proExpiresAt,
             },
         };  
     }
 
-    async getMe(userId: number) {
+    async getMe(userId: string) {
 
         const user = await this.prisma.user.findUnique ({
             where: {
@@ -102,7 +103,7 @@ export class AuthService {
                 fullName: true,
                 role: true,
                 isActive: true,
-                isPro: true,
+                accessLevel: true,
                 proExpiresAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -116,7 +117,7 @@ export class AuthService {
     }
 
     async changePassword (
-        userId: number,
+        userId: string,
         changePasswordDto: ChangePasswordDto,
     ) {
         const { oldPassword, newPassword } = changePasswordDto;
@@ -157,3 +158,4 @@ export class AuthService {
     }
 
 }
+
