@@ -1,10 +1,16 @@
-import { ConflictException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+    ConflictException,
+    ForbiddenException,
+    Injectable,
+    UnauthorizedException,
+} from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { Prisma } from '../../generated/client/client';
 
 
 @Injectable()
@@ -15,7 +21,8 @@ export class AuthService {
     ) {}
 
     async register(registerDto : RegisterDto) {
-        const { email, password, fullName } = registerDto;
+        const { password, dateOfBirth } = registerDto;
+        const email = this.normalizeEmail(registerDto.email);
 
         const existingUser = await this.prisma.user.findUnique({
             where: { email },
@@ -27,31 +34,44 @@ export class AuthService {
 
         const passwordHash = await bcrypt.hash(password, 10);
 
-        const user = await this.prisma.user.create ({
-            data: {
-                email,
-                passwordHash,
-                fullName: fullName ?? '',
-                phone: '',
-                dateOfBirth: new Date(),
-            },
-            select: {
-                id: true,
-                email: true,
-                fullName: true,
-                role: true,
-                isActive: true,
-                accessLevel: true,
-                proExpiresAt: true,
-                createdAt: true,
-                updatedAt: true,
-            },
-        });
-        return user;
+        try {
+            return await this.prisma.user.create ({
+                data: {
+                    email,
+                    passwordHash,
+                    fullName: registerDto.fullName.trim(),
+                    phone: registerDto.phone.trim(),
+                    dateOfBirth: new Date(dateOfBirth),
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    fullName: true,
+                    phone: true,
+                    dateOfBirth: true,
+                    role: true,
+                    isActive: true,
+                    accessLevel: true,
+                    proExpiresAt: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+        } catch (error) {
+            if (
+                error instanceof Prisma.PrismaClientKnownRequestError &&
+                error.code === 'P2002'
+            ) {
+                throw new ConflictException('Email already exists');
+            }
+
+            throw error;
+        }
     }
 
     async login(loginDto : LoginDto) {
-        const { email, password } = loginDto;
+        const { password } = loginDto;
+        const email = this.normalizeEmail(loginDto.email);
 
         const user = await this.prisma.user.findUnique({
             where: { email }
@@ -76,19 +96,28 @@ export class AuthService {
             email: user.email,
             role: user.role
         }
-        
+
+        const loggedInUser = await this.prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+            select: {
+                id: true,
+                email: true,
+                fullName: true,
+                phone: true,
+                dateOfBirth: true,
+                role: true,
+                isActive: true,
+                accessLevel: true,
+                lastLoginAt: true,
+                proExpiresAt: true,
+            },
+        });
+
         const accessToken = await this.jwtService.signAsync(payload);
         return {
             accessToken,
-            user: {
-                id: user.id,
-                email: user.email,
-                fullName: user.fullName,
-                role: user.role,
-                isActive: user.isActive,
-                accessLevel: user.accessLevel,
-                proExpiresAt: user.proExpiresAt,
-            },
+            user: loggedInUser,
         };  
     }
 
@@ -102,9 +131,12 @@ export class AuthService {
                 id: true,
                 email: true,
                 fullName: true,
+                phone: true,
+                dateOfBirth: true,
                 role: true,
                 isActive: true,
                 accessLevel: true,
+                lastLoginAt: true,
                 proExpiresAt: true,
                 createdAt: true,
                 updatedAt: true,
@@ -114,6 +146,11 @@ export class AuthService {
         if (!user) {
             throw new UnauthorizedException('User not found!');
         }
+
+        if (!user.isActive) {
+            throw new ForbiddenException('Account is locked');
+        }
+
         return user;
     }
 
@@ -131,6 +168,10 @@ export class AuthService {
 
         if(!user) {
             throw new UnauthorizedException('User not found');
+        }
+
+        if (!user.isActive) {
+            throw new ForbiddenException('Account is locked');
         }
 
         const isOldPasswordValid = await bcrypt.compare(
@@ -156,6 +197,10 @@ export class AuthService {
             message: 'Password changed successfully',
         };
 
+    }
+
+    private normalizeEmail(email: string): string {
+        return email.trim().toLowerCase();
     }
 
 }
