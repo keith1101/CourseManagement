@@ -135,28 +135,31 @@ Ghi chú: Học sinh chỉ xem tài liệu online, không tải trực tiếp.
 
 ## 5. Exams Module
 
-Exams module quản lý đề thi.
+Exams module quản lý đề thi theo môn học. Exam bắt buộc thuộc một Subject đang active khi tạo hoặc đổi Subject.
 
 Đề thi hỗ trợ các trạng thái:
 
 * DRAFT
 * PUBLISHED
+* ARCHIVED (dành cho mở rộng sau, hiện chưa có endpoint archive)
 
 | Method | Endpoint               | Mô tả                              | Quyền         | Trạng thái |
 | ------ | ---------------------- | ---------------------------------- | ------------- | ---------- |
-| POST   | `/api/exams`               | Tạo đề thi                         | Admin         | Planned    |
-| GET    | `/api/exams`               | Lấy danh sách đề thi               | Student/Admin | Planned    |
-| GET    | `/api/exams/:id`           | Xem chi tiết đề thi                | Student/Admin | Planned    |
-| PATCH  | `/api/exams/:id`           | Cập nhật đề thi                    | Admin         | Planned    |
-| DELETE | `/api/exams/:id`           | Xóa đề thi                         | Admin         | Planned    |
-| PATCH  | `/api/exams/:id/publish`   | Công khai đề thi                   | Admin         | Planned    |
-| PATCH  | `/api/exams/:id/unpublish` | Chuyển đề thi về trạng thái Draft | Admin         | Planned    |
+| POST   | `/api/exams`               | Tạo đề thi                         | Admin         | Done       |
+| GET    | `/api/exams`               | Lấy danh sách đề thi               | Student/Admin | Done       |
+| GET    | `/api/exams/:id`           | Xem chi tiết đề thi                | Student/Admin | Done       |
+| PATCH  | `/api/exams/:id`           | Cập nhật đề thi                    | Admin         | Done       |
+| DELETE | `/api/exams/:id`           | Xóa đề thi                         | Admin         | Done       |
+| PATCH  | `/api/exams/:id/publish`   | Công khai đề thi                   | Admin         | Done       |
+| PATCH  | `/api/exams/:id/unpublish` | Chuyển đề thi về trạng thái Draft | Admin         | Done       |
 
 Hỗ trợ lọc đề thi theo trạng thái:
 
 `GET /api/exams?status=PUBLISHED`
 
 `GET /api/exams?status=DRAFT`
+
+Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`; Admin có thể lọc mọi trạng thái. Exam trả về thông tin Subject và số lượng liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. Exam chỉ được xóa khi chưa có Questions, Assignments hoặc Attempts.
 
 ## 6. Questions Module
 
