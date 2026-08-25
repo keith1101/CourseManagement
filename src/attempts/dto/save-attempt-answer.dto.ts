@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
 import { AnswerValueType } from '../../../generated/client/enums';
 
 export class SaveAttemptAnswerDto {
@@ -31,4 +31,8 @@ export class SaveAttemptAnswerDto {
     @Type(() => Number)
     @IsNumber()
     numericValue?: number;
+
+    @IsOptional()
+    @IsBoolean()
+    timedOut?: boolean;
 }

@@ -5,6 +5,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtService } from '@nestjs/jwt';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class AuthService {
@@ -14,7 +15,7 @@ export class AuthService {
     ) {}
 
     async register(registerDto : RegisterDto) {
-        const { email, password, fullName } = registerDto;
+        const { email, password, fullName, phone } = registerDto;
 
         const existingUser = await this.prisma.user.findUnique({
             where: { email },
@@ -31,7 +32,7 @@ export class AuthService {
                 email,
                 passwordHash,
                 fullName: fullName ?? '',
-                phone: '',
+                phone: phone ?? '',
                 dateOfBirth: new Date(),
             },
             select: {
@@ -42,6 +43,8 @@ export class AuthService {
                 isActive: true,
                 accessLevel: true,
                 proExpiresAt: true,
+                phone: true,
+                dateOfBirth: true,
                 createdAt: true,
                 updatedAt: true,
             },
@@ -87,6 +90,8 @@ export class AuthService {
                 isActive: user.isActive,
                 accessLevel: user.accessLevel,
                 proExpiresAt: user.proExpiresAt,
+                phone: user.phone,
+                dateOfBirth: user.dateOfBirth,
             },
         };  
     }
@@ -105,6 +110,8 @@ export class AuthService {
                 isActive: true,
                 accessLevel: true,
                 proExpiresAt: true,
+                phone: true,
+                dateOfBirth: true,
                 createdAt: true,
                 updatedAt: true,
             }
@@ -155,6 +162,39 @@ export class AuthService {
             message: 'Password changed successfully',
         };
 
+    }
+
+    async updateProfile(userId: string, updateProfileDto: UpdateProfileDto) {
+        const existing = await this.prisma.user.findUnique({ where: { id: userId } });
+        if (!existing) throw new UnauthorizedException('User not found');
+
+        if (updateProfileDto.email && updateProfileDto.email !== existing.email) {
+            const emailOwner = await this.prisma.user.findUnique({ where: { email: updateProfileDto.email } });
+            if (emailOwner && emailOwner.id !== userId) throw new ConflictException('Email already exists');
+        }
+
+        return this.prisma.user.update({
+            where: { id: userId },
+            data: {
+                fullName: updateProfileDto.fullName,
+                email: updateProfileDto.email,
+                phone: updateProfileDto.phone,
+                dateOfBirth: updateProfileDto.dateOfBirth ? new Date(updateProfileDto.dateOfBirth) : undefined,
+            },
+            select: {
+                id: true,
+                email: true,
+                fullName: true,
+                role: true,
+                isActive: true,
+                accessLevel: true,
+                proExpiresAt: true,
+                phone: true,
+                dateOfBirth: true,
+                createdAt: true,
+                updatedAt: true,
+            },
+        });
     }
 
 }

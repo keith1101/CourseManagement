@@ -8,6 +8,8 @@ import { QuestionsModule } from './questions/questions.module';
 import { SubjectsModule } from './subjects/subjects.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { AttemptsModule } from './attempts/attempts.module';
+import { ExamsModule } from './exams/exams.module';
+import { MaterialsModule } from './materials/materials.module';
 
 @Module({
   imports: [
@@ -17,12 +19,13 @@ import { AttemptsModule } from './attempts/attempts.module';
     PrismaModule,
     AuthModule,
     UsersModule,
+    ExamsModule,
     QuestionsModule,
     SubjectsModule,
+    MaterialsModule,
     AssignmentsModule,
     AttemptsModule,
   ],
   controllers: [AppController],
 })
-export class AppModule { }
-
+export class AppModule {}

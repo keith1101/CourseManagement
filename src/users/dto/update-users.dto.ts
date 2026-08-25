@@ -1,4 +1,4 @@
-import { IsBoolean, IsDate, IsEmail, IsEnum, IsOptional, IsPhoneNumber, IsString } from "class-validator";
+import { IsBoolean, IsDateString, IsEmail, IsEnum, IsOptional, IsPhoneNumber, IsString } from "class-validator";
 import { AccessLevel, UserRole } from "../../../generated/client/enums";
 import { User } from "../../../generated/client/client";
 
@@ -16,8 +16,8 @@ export class UpdateUsersDto {
     phone!: string;
 
     @IsOptional()
-    @IsDate()
-    dateOfBirth!: Date;
+    @IsDateString()
+    dateOfBirth?: string;
 
     @IsOptional()
     @IsEnum(UserRole)
@@ -29,5 +29,9 @@ export class UpdateUsersDto {
 
     @IsOptional()
     @IsEnum(AccessLevel)
-    accessLevel!: AccessLevel;
+    accessLevel?: AccessLevel;
+
+    @IsOptional()
+    @IsDateString()
+    proExpiresAt?: string | null;
 }

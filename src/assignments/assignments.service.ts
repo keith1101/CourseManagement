@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { AttemptStatus } from '../../generated/client/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignmentStatus } from './dto/assignment-status.enum';
@@ -23,12 +23,14 @@ const assignmentInclude = {
             accessLevel: true,
         },
     },
-    examAttempts: {
-        select: {
-            id: true,
-            status: true,
-            startedAt: true,
-            submittedAt: true,
+        examAttempts: {
+            select: {
+                id: true,
+                status: true,
+                startedAt: true,
+                submittedAt: true,
+                correctCount: true,
+                totalQuestions: true,
         },
         orderBy: {
             startedAt: 'desc' as const,
@@ -60,11 +62,25 @@ export class AssignmentsService {
             throw new NotFoundException('Exam not found');
         }
 
+        const dueAt = new Date(createAssignmentDto.dueAt);
+        if (dueAt.getTime() <= Date.now()) {
+            throw new BadRequestException('Due date must be in the future');
+        }
+
+        const existing = await this.prisma.examAssignment.findFirst({
+            where: {
+                userId: createAssignmentDto.userId,
+                examId: createAssignmentDto.examId,
+            },
+            select: { id: true },
+        });
+        if (existing) throw new ConflictException('Assignment already exists for this student and exam');
+
         const assignment = await this.prisma.examAssignment.create({
             data: {
                 userId: createAssignmentDto.userId,
                 examId: createAssignmentDto.examId,
-                dueAt: new Date(createAssignmentDto.dueAt),
+                dueAt,
             },
             include: assignmentInclude,
         });
@@ -112,10 +128,15 @@ export class AssignmentsService {
     async update(id: string, updateAssignmentDto: UpdateAssignmentDto) {
         await this.findOne(id);
 
+        const dueAt = new Date(updateAssignmentDto.dueAt);
+        if (dueAt.getTime() <= Date.now()) {
+            throw new BadRequestException('Due date must be in the future');
+        }
+
         await this.prisma.examAssignment.update({
             where: { id },
             data: {
-                dueAt: new Date(updateAssignmentDto.dueAt),
+                dueAt,
             },
         });
 
@@ -133,7 +154,7 @@ export class AssignmentsService {
     private withStatus<
         T extends {
             dueAt: Date;
-            examAttempts: Array<{ status: AttemptStatus }>;
+            examAttempts: Array<{ status: AttemptStatus; id: string; correctCount: number | null; totalQuestions: number }>;
         },
     >(assignment: T) {
         const hasCompletedAttempt = assignment.examAttempts.some(

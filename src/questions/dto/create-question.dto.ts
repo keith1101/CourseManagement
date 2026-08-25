@@ -1,5 +1,16 @@
-import { IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import {
+    IsArray,
+    IsEnum,
+    IsInt,
+    IsNotEmpty,
+    IsOptional,
+    IsString,
+    Min,
+    ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { QuestionType } from '../../../generated/client/enums';
+import { QuestionOptionDto } from './question-option.dto';
 
 export class CreateQuestionDto {
     @IsEnum(QuestionType)
@@ -28,4 +39,10 @@ export class CreateQuestionDto {
     @IsOptional()
     @IsString()
     correctTextAnswer?: string;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => QuestionOptionDto)
+    options?: QuestionOptionDto[];
 }

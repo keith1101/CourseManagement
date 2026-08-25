@@ -109,14 +109,24 @@ export class AttemptsService {
         userId: string,
         startAttemptDto: StartAttemptDto,
     ) {
-        const exam = await this.prisma.exam.findUnique({
-            where: { id: examId },
-            select: {
-                id: true,
-                status: true,
-                title: true,
-            },
-        });
+        const [exam, user] = await Promise.all([
+            this.prisma.exam.findUnique({
+                where: { id: examId },
+                select: {
+                    id: true,
+                    status: true,
+                    title: true,
+                    accessLevel: true,
+                },
+            }),
+            this.prisma.user.findUnique({
+                where: { id: userId },
+                select: {
+                    accessLevel: true,
+                    proExpiresAt: true,
+                },
+            }),
+        ]);
 
         if (!exam) {
             throw new NotFoundException('Exam not found');
@@ -124,6 +134,35 @@ export class AttemptsService {
 
         if (exam.status !== 'PUBLISHED') {
             throw new ForbiddenException('Exam is not published');
+        }
+
+        const isPro =
+            user?.accessLevel === 'PRO' &&
+            (!user.proExpiresAt || user.proExpiresAt.getTime() > Date.now());
+
+        if (exam.accessLevel === 'PRO' && !isPro) {
+            throw new ForbiddenException(
+                'Tài khoản miễn phí không thể làm đề thi PRO. Vui lòng nâng cấp qua Zalo!',
+            );
+        }
+
+        // BR-02: Free user is limited to the first 2 published exams
+        if (!isPro) {
+            const firstTwoExams = await this.prisma.exam.findMany({
+                where: { status: 'PUBLISHED' },
+                orderBy: [
+                    { displayOrder: 'asc' },
+                    { createdAt: 'asc' },
+                ],
+                take: 2,
+                select: { id: true },
+            });
+            const allowedIds = firstTwoExams.map((e) => e.id);
+            if (!allowedIds.includes(examId)) {
+                throw new ForbiddenException(
+                    'Tài khoản miễn phí chỉ được làm 2 đề đầu tiên. Vui lòng nâng cấp Pro để mở khóa toàn bộ!',
+                );
+            }
         }
 
         let assignmentId = startAttemptDto.assignmentId;
@@ -267,11 +306,22 @@ export class AttemptsService {
                 id: true,
                 position: true,
                 questionType: true,
+                correctTextAnswer: true,
+                explaination: true,
                 questionOptions: {
                     select: {
                         id: true,
                         contentText: true,
                         isCorrect: true,
+                    },
+                },
+                questionAcceptedAnswers: {
+                    select: {
+                        answerType: true,
+                        rawValue: true,
+                        normalizedText: true,
+                        numericValue: true,
+                        isPrimary: true,
                     },
                 },
             },
@@ -288,13 +338,13 @@ export class AttemptsService {
               )
             : undefined;
 
-        if (question.questionType === QuestionType.MULTIPLE_CHOICE) {
+        if (question.questionType === QuestionType.MULTIPLE_CHOICE && !saveAttemptAnswerDto.timedOut) {
             if (!selectedOptionId || !selectedOption) {
                 throw new BadRequestException(
                     'A valid selectedOptionId is required for multiple-choice questions',
                 );
             }
-        } else if (!saveAttemptAnswerDto.rawValue?.trim()) {
+        } else if (!saveAttemptAnswerDto.timedOut && !saveAttemptAnswerDto.rawValue?.trim()) {
             throw new BadRequestException(
                 'rawValue is required for short-answer questions',
             );
@@ -309,7 +359,15 @@ export class AttemptsService {
             saveAttemptAnswerDto.rawValue ?? selectedOption?.contentText ?? '';
         const normalizedText =
             saveAttemptAnswerDto.normalizedText ?? this.normalize(rawValue);
-        const isCorrect = selectedOption?.isCorrect ?? false;
+        const isCorrect = saveAttemptAnswerDto.timedOut
+            ? false
+            : this.isAnswerCorrect(question, {
+                  selectedOptionId: selectedOptionId ?? null,
+                  answerType,
+                  rawValue,
+                  normalizedText,
+                  numericValue: saveAttemptAnswerDto.numericValue ?? null,
+              });
 
         const existingAnswer = await this.prisma.attemptAnswer.findFirst({
             where: {
@@ -354,6 +412,11 @@ export class AttemptsService {
             content: answer.content,
             position: answer.position,
             numericValue: answer.numericValue,
+            isCorrect: answer.isCorrect,
+            timedOut: !!saveAttemptAnswerDto.timedOut,
+            correctOptionId: question.questionOptions.find((option) => option.isCorrect)?.id,
+            correctTextAnswer: question.correctTextAnswer ?? question.questionAcceptedAnswers.find((accepted) => accepted.isPrimary)?.rawValue,
+            explanation: question.explaination,
         };
     }
 
@@ -533,8 +596,34 @@ export class AttemptsService {
             throw new NotFoundException('Attempt not found');
         }
 
+        const questions = await this.prisma.question.findMany({
+            where: { examId: result.examId, deletedAt: null },
+            select: {
+                id: true,
+                examId: true,
+                questionType: true,
+                contentText: true,
+                imageUrl: true,
+                instruction: true,
+                explaination: true,
+                timeLimitSeconds: true,
+                correctTextAnswer: true,
+                position: true,
+                questionOptions: {
+                    select: { id: true, contentText: true, isCorrect: true, position: true },
+                    orderBy: { position: 'asc' as const },
+                },
+                questionAcceptedAnswers: {
+                    select: { answerType: true, rawValue: true, normalizedText: true, numericValue: true, isPrimary: true },
+                    orderBy: { position: 'asc' as const },
+                },
+            },
+            orderBy: { position: 'asc' },
+        });
+
         return {
             ...result,
+            questions,
             percentage:
                 result.totalQuestions === 0
                     ? 0

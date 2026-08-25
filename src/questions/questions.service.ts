@@ -6,6 +6,20 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
+import { CreateQuestionOptionDto, UpdateQuestionOptionDto } from './dto/question-option.dto';
+
+const questionInclude = {
+    questionOptions: {
+        orderBy: {
+            position: 'asc' as const,
+        },
+    },
+    questionAcceptedAnswers: {
+        orderBy: {
+            position: 'asc' as const,
+        },
+    },
+} as const;
 
 @Injectable()
 export class QuestionsService {
@@ -29,7 +43,7 @@ export class QuestionsService {
                 },
             });
 
-            return transaction.question.create({
+            const question = await transaction.question.create({
                 data: {
                     examId,
                     questionType: createQuestionDto.questionType,
@@ -41,6 +55,22 @@ export class QuestionsService {
                     correctTextAnswer: createQuestionDto.correctTextAnswer,
                     position,
                 },
+            });
+
+            if (createQuestionDto.options && createQuestionDto.options.length > 0) {
+                await transaction.questionOption.createMany({
+                    data: createQuestionDto.options.map((opt, index) => ({
+                        questionId: question.id,
+                        contentText: opt.contentText,
+                        isCorrect: opt.isCorrect ?? false,
+                        position: opt.position ?? index,
+                    })),
+                });
+            }
+
+            return transaction.question.findUnique({
+                where: { id: question.id },
+                include: questionInclude,
             });
         });
     }
@@ -60,6 +90,7 @@ export class QuestionsService {
                 examId,
                 deletedAt: null,
             },
+            include: questionInclude,
             orderBy: {
                 position: 'asc',
             },
@@ -72,6 +103,7 @@ export class QuestionsService {
                 id,
                 deletedAt: null,
             },
+            include: questionInclude,
         });
 
         if (!question) {
@@ -82,11 +114,38 @@ export class QuestionsService {
     }
 
     async update(id: string, updateQuestionsDto: UpdateQuestionsDto) {
-        await this.find(id);
+        const existing = await this.find(id);
 
-        return this.prismaService.question.update({
-            where: { id },
-            data: updateQuestionsDto,
+        return this.prismaService.$transaction(async (transaction) => {
+            const { options, ...questionData } = updateQuestionsDto;
+
+            await transaction.question.update({
+                where: { id },
+                data: questionData,
+            });
+
+            if (options !== undefined) {
+                // Replace options
+                await transaction.questionOption.deleteMany({
+                    where: { questionId: id },
+                });
+
+                if (options.length > 0) {
+                    await transaction.questionOption.createMany({
+                        data: options.map((opt, index) => ({
+                            questionId: id,
+                            contentText: opt.contentText,
+                            isCorrect: opt.isCorrect ?? false,
+                            position: opt.position ?? index,
+                        })),
+                    });
+                }
+            }
+
+            return transaction.question.findUnique({
+                where: { id },
+                include: questionInclude,
+            });
         });
     }
 
@@ -116,7 +175,7 @@ export class QuestionsService {
         }
 
         if (question.position === order) {
-            return question;
+            return this.find(id);
         }
 
         return this.prismaService.$transaction(async (transaction) => {
@@ -154,9 +213,14 @@ export class QuestionsService {
                 });
             }
 
-            return transaction.question.update({
+            await transaction.question.update({
                 where: { id },
                 data: { position: order },
+            });
+
+            return transaction.question.findUnique({
+                where: { id },
+                include: questionInclude,
             });
         });
     }
@@ -195,6 +259,53 @@ export class QuestionsService {
             });
 
             return deletedQuestion;
+        });
+    }
+
+    // QuestionOption sub-resource methods
+    async createOption(questionId: string, dto: CreateQuestionOptionDto) {
+        await this.find(questionId);
+
+        const position = dto.position ?? (await this.prismaService.questionOption.count({
+            where: { questionId },
+        }));
+
+        return this.prismaService.questionOption.create({
+            data: {
+                questionId,
+                contentText: dto.contentText,
+                isCorrect: dto.isCorrect ?? false,
+                position,
+            },
+        });
+    }
+
+    async updateOption(optionId: string, dto: UpdateQuestionOptionDto) {
+        const option = await this.prismaService.questionOption.findUnique({
+            where: { id: optionId },
+        });
+
+        if (!option) {
+            throw new NotFoundException('Option not found');
+        }
+
+        return this.prismaService.questionOption.update({
+            where: { id: optionId },
+            data: dto,
+        });
+    }
+
+    async deleteOption(optionId: string) {
+        const option = await this.prismaService.questionOption.findUnique({
+            where: { id: optionId },
+        });
+
+        if (!option) {
+            throw new NotFoundException('Option not found');
+        }
+
+        return this.prismaService.questionOption.delete({
+            where: { id: optionId },
         });
     }
 }
