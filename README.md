@@ -84,18 +84,19 @@ Users module cho phép Admin quản lý tài khoản học sinh.
 
 | Method | Endpoint            | Mô tả                         | Quyền | Trạng thái |
 | ------ | ------------------- | ----------------------------- | ----- | ---------- |
-| GET    | `/api/users`            | Lấy danh sách học sinh        | Admin | Planned    |
-| GET    | `/api/users/:id`        | Xem chi tiết học sinh         | Admin | Planned    |
-| PATCH  | `/api/users/:id`        | Cập nhật thông tin học sinh   | Admin | Planned    |
-| PATCH  | `/api/users/:id/lock`   | Khóa tài khoản                | Admin | Planned    |
-| PATCH  | `/api/users/:id/unlock` | Mở khóa tài khoản             | Admin | Planned    |
-| PATCH  | `/api/users/:id/pro`    | Cập nhật tài khoản Thường/Pro | Admin | Planned    |
+| GET    | `/api/users`            | Lấy danh sách học sinh        | Admin | Done       |
+| GET    | `/api/users/:id`        | Xem chi tiết học sinh         | Admin | Done       |
+| PATCH  | `/api/users/:id`        | Cập nhật thông tin học sinh   | Admin | Done       |
+| PATCH  | `/api/users/:id/lock`   | Khóa tài khoản                | Admin | Done       |
+| PATCH  | `/api/users/:id/unlock` | Mở khóa tài khoản             | Admin | Done       |
+| PATCH  | `/api/users/:id/pro`    | Chuyển tài khoản sang Pro     | Admin | Done       |
+| PATCH  | `/api/users/:id/free`   | Chuyển tài khoản về Free      | Admin | Done       |
 
 Hỗ trợ tìm kiếm học sinh:
 
 `GET /api/users?search=...`
 
-Ghi chú: Hàm tìm học sinh theo email được sử dụng nội bộ cho Auth module, không cần tạo endpoint riêng để tránh làm lộ email người dùng.
+Ghi chú: Hàm tìm học sinh theo email được sử dụng nội bộ cho Auth module, không cần tạo endpoint riêng để tránh làm lộ email người dùng. Response Users không chứa `passwordHash`.
 
 ## 3. Subjects Module
 
@@ -163,12 +164,15 @@ Questions module quản lý câu hỏi trong đề thi.
 
 | Method | Endpoint                   | Mô tả                        | Quyền         | Trạng thái |
 | ------ | -------------------------- | ---------------------------- | ------------- | ---------- |
-| GET    | `/api/exams/:examId/questions` | Lấy danh sách câu hỏi của đề | Student/Admin | Planned    |
-| POST   | `/api/exams/:examId/questions` | Thêm câu hỏi vào đề thi      | Admin         | Planned    |
-| GET    | `/api/questions/:id`           | Xem chi tiết câu hỏi         | Student/Admin | Planned    |
-| PATCH  | `/api/questions/:id`           | Cập nhật câu hỏi             | Admin         | Planned    |
-| PATCH  | `/api/questions/:id/order`     | Thay đổi thứ tự câu hỏi      | Admin         | Planned    |
-| DELETE | `/api/questions/:id`           | Xóa câu hỏi                  | Admin         | Planned    |
+| GET    | `/api/exams/:examId/questions` | Lấy danh sách câu hỏi của đề | Student/Admin | Done       |
+| POST   | `/api/exams/:examId/questions` | Thêm câu hỏi vào đề thi      | Admin         | Done       |
+| GET    | `/api/questions/:id`           | Xem chi tiết câu hỏi         | Student/Admin | Done       |
+| PATCH  | `/api/questions/:id`           | Cập nhật câu hỏi             | Admin         | Done       |
+| PATCH  | `/api/questions/:id/order`     | Thay đổi thứ tự câu hỏi      | Admin         | Done       |
+| DELETE | `/api/questions/:id`           | Xóa câu hỏi                  | Admin         | Done       |
+| POST   | `/api/questions/:id/options`   | Thêm đáp án                  | Admin         | Done       |
+| PATCH  | `/api/questions/options/:optionId` | Cập nhật đáp án           | Admin         | Done       |
+| DELETE | `/api/questions/options/:optionId` | Xóa đáp án                | Admin         | Done       |
 
 Câu hỏi hỗ trợ:
 
@@ -180,7 +184,7 @@ Câu hỏi hỗ trợ:
 * Hướng dẫn
 * Thời gian riêng cho từng câu
 
-Ghi chú: Khi học sinh xem câu hỏi, hệ thống không được trả về đáp án đúng trước thời điểm cho phép.
+Ghi chú: Khi học sinh xem câu hỏi, hệ thống không trả về đáp án đúng trước thời điểm cho phép.
 
 ## 7. Assignments Module
 
@@ -188,11 +192,11 @@ Assignments module cho phép Admin giao đề thi cho học sinh.
 
 | Method | Endpoint           | Mô tả                            | Quyền         | Trạng thái |
 | ------ | ------------------ | -------------------------------- | ------------- | ---------- |
-| POST   | `/api/assignments`     | Giao đề thi cho học sinh         | Admin         | Planned    |
-| GET    | `/api/assignments`     | Xem danh sách đề được giao       | Student/Admin | Planned    |
-| GET    | `/api/assignments/:id` | Xem chi tiết assignment          | Student/Admin | Planned    |
-| PATCH  | `/api/assignments/:id` | Cập nhật deadline hoặc thông tin | Admin         | Planned    |
-| DELETE | `/api/assignments/:id` | Hủy assignment                   | Admin         | Planned    |
+| POST   | `/api/assignments`     | Giao đề thi cho học sinh         | Admin         | Done       |
+| GET    | `/api/assignments`     | Xem danh sách đề được giao       | Student/Admin | Done       |
+| GET    | `/api/assignments/:id` | Xem chi tiết assignment          | Student/Admin | Done       |
+| PATCH  | `/api/assignments/:id` | Cập nhật deadline hoặc thông tin | Admin         | Done       |
+| DELETE | `/api/assignments/:id` | Hủy assignment                   | Admin         | Done       |
 
 Hỗ trợ lọc assignment theo học sinh:
 
@@ -215,14 +219,14 @@ Attempts module xử lý quá trình làm bài, lưu câu trả lời, nộp bà
 
 | Method | Endpoint                  | Mô tả                        | Quyền         | Trạng thái |
 | ------ | ------------------------- | ---------------------------- | ------------- | ---------- |
-| POST   | `/api/exams/:examId/attempts` | Bắt đầu làm bài              | Student       | Planned    |
-| GET    | `/api/attempts`               | Xem lịch sử làm bài          | Student/Admin | Planned    |
-| GET    | `/api/attempts/:id`           | Xem chi tiết một lần làm bài | Student/Admin | Planned    |
-| POST   | `/api/attempts/:id/answers`   | Gửi hoặc lưu câu trả lời     | Student       | Planned    |
-| POST   | `/api/attempts/:id/submit`    | Nộp bài                      | Student       | Planned    |
-| GET    | `/api/attempts/:id/result`    | Xem kết quả bài làm          | Student/Admin | Planned    |
+| POST   | `/api/exams/:examId/attempts` | Bắt đầu làm bài              | Student       | Done       |
+| GET    | `/api/attempts`               | Xem lịch sử làm bài          | Student/Admin | Done       |
+| GET    | `/api/attempts/:id`           | Xem chi tiết một lần làm bài | Student/Admin | Done       |
+| POST   | `/api/attempts/:id/answers`   | Gửi hoặc lưu câu trả lời     | Student       | Done       |
+| POST   | `/api/attempts/:id/submit`    | Nộp bài                      | Student       | Done       |
+| GET    | `/api/attempts/:id/result`    | Xem kết quả bài làm          | Student/Admin | Done       |
 
-Ghi chú: Mỗi câu hỏi có thời gian riêng.
+Ghi chú: Mỗi câu hỏi có thời gian riêng. Câu hỏi `SHORT_ANSWER` lưu `selectedOptionId = null`; câu hỏi trắc nghiệm chỉ chấp nhận option thuộc chính câu hỏi đó.
 
 Nếu học sinh trả lời sai hoặc hết giờ, hệ thống có thể hiển thị:
 
