@@ -211,8 +211,8 @@ model AttemptAnswer {
   examAttempt      ExamAttempt     @relation(fields: [attemptId], references: [id])
   questionId       String
   question         Question        @relation(fields: [questionId], references: [id])
-  selectedOptionId String
-  selectedOption   QuestionOption  @relation(fields: [selectedOptionId], references: [id])
+  selectedOptionId String?
+  selectedOption   QuestionOption? @relation(fields: [selectedOptionId], references: [id])
   answerType       AnswerValueType
   rawValue         String
   normalizedText   String?

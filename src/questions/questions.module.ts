@@ -4,7 +4,7 @@ import { QuestionsController } from './questions.controller';
 import { ExamQuestionsController } from './exam-questions.controller';
 
 @Module({
-  providers: [QuestionsService, ExamQuestionsController],
-  controllers: [QuestionsController]
+  providers: [QuestionsService],
+  controllers: [QuestionsController, ExamQuestionsController]
 })
 export class QuestionsModule {}
