@@ -40,8 +40,8 @@ export class AuthService {
                     email,
                     passwordHash,
                     fullName: registerDto.fullName.trim(),
-                    phone: registerDto.phone.trim(),
-                    dateOfBirth: new Date(dateOfBirth),
+                    phone: registerDto.phone?.trim() || null,
+                    dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
                 },
                 select: {
                     id: true,

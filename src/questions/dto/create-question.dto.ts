@@ -5,6 +5,7 @@ import {
     IsNotEmpty,
     IsOptional,
     IsString,
+    IsUUID,
     Min,
     ValidateNested,
 } from 'class-validator';
@@ -13,6 +14,9 @@ import { QuestionType } from '../../../generated/client/enums';
 import { QuestionOptionDto } from './question-option.dto';
 
 export class CreateQuestionDto {
+    @IsUUID()
+    subjectId!: string;
+
     @IsEnum(QuestionType)
     questionType!: QuestionType;
 

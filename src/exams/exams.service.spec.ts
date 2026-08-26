@@ -10,24 +10,14 @@ import { ExamQueryDto } from './dto/exam-query.dto';
 import { ExamsService } from './exams.service';
 
 describe('ExamsService', () => {
-  const activeSubject = { id: 'subject-1', isActive: true };
   const exam = {
     id: 'exam-1',
-    subjectId: 'subject-1',
     title: 'Mock exam',
     description: null,
     status: ExamStatus.DRAFT,
     accessLevel: AccessLevel.FREE,
     displayOrder: 0,
     publishedAt: null,
-    subject: {
-      id: 'subject-1',
-      code: 'MATH',
-      name: 'Math',
-      description: null,
-      displayOrder: 1,
-      isActive: true,
-    },
     _count: { questions: 0, examAssignments: 0, examAttempts: 0 },
   };
 
@@ -36,7 +26,6 @@ describe('ExamsService', () => {
 
   beforeEach(() => {
     prisma = {
-      subject: { findUnique: jest.fn() },
       user: { findUnique: jest.fn() },
       exam: {
         findUnique: jest.fn(),
@@ -50,13 +39,11 @@ describe('ExamsService', () => {
     service = new ExamsService(prisma as PrismaService);
   });
 
-  it('creates a DRAFT exam for an active subject and ignores protected fields', async () => {
-    prisma.subject.findUnique.mockResolvedValue(activeSubject);
+  it('creates a DRAFT exam without requiring a Subject and ignores protected fields', async () => {
     prisma.exam.create.mockResolvedValue(exam);
 
     await expect(
       service.create({
-        subjectId: 'subject-1',
         title: '  Mock exam  ',
         accessLevel: AccessLevel.PRO,
         status: ExamStatus.PUBLISHED,
@@ -67,7 +54,6 @@ describe('ExamsService', () => {
     expect(prisma.exam.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          subjectId: 'subject-1',
           title: 'Mock exam',
           description: undefined,
           accessLevel: AccessLevel.PRO,
@@ -78,18 +64,6 @@ describe('ExamsService', () => {
       }),
     );
   });
-
-  it.each([null, { id: 'subject-1', isActive: false }])(
-    'rejects creation when Subject is missing or inactive',
-    async (subject) => {
-      prisma.subject.findUnique.mockResolvedValue(subject);
-
-      await expect(
-        service.create({ subjectId: 'subject-1', title: 'Exam' }),
-      ).rejects.toBeInstanceOf(NotFoundException);
-      expect(prisma.exam.create).not.toHaveBeenCalled();
-    },
-  );
 
   it('lists every requested status for Admin in stable order', async () => {
     prisma.exam.findMany.mockResolvedValue([exam]);
@@ -176,20 +150,17 @@ describe('ExamsService', () => {
 
     const include = prisma.exam.findFirst.mock.calls[0][0].include;
     expect(include).not.toHaveProperty('questions');
-    expect(include.subject.select).not.toHaveProperty('passwordHash');
+    expect(include).not.toHaveProperty('subject');
   });
 
-  it('updates allowed fields and validates a changed active Subject', async () => {
+  it('updates allowed fields without a Subject relation', async () => {
     prisma.exam.findUnique.mockResolvedValue({
       id: 'exam-1',
-      subjectId: 'subject-1',
       status: ExamStatus.DRAFT,
     });
-    prisma.subject.findUnique.mockResolvedValue({ id: 'subject-2', isActive: true });
     prisma.exam.update.mockResolvedValue(exam);
 
     await service.update('exam-1', {
-      subjectId: 'subject-2',
       title: 'Updated',
       status: ExamStatus.PUBLISHED,
       publishedAt: new Date(),
@@ -198,23 +169,10 @@ describe('ExamsService', () => {
     expect(prisma.exam.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: {
-          subjectId: 'subject-2',
           title: 'Updated',
         },
       }),
     );
-  });
-
-  it('rejects changing to a missing or inactive Subject', async () => {
-    prisma.exam.findUnique.mockResolvedValue({
-      id: 'exam-1', subjectId: 'subject-1', status: ExamStatus.DRAFT,
-    });
-    prisma.subject.findUnique.mockResolvedValue({ id: 'subject-2', isActive: false });
-
-    await expect(
-      service.update('exam-1', { subjectId: 'subject-2' }),
-    ).rejects.toBeInstanceOf(NotFoundException);
-    expect(prisma.exam.update).not.toHaveBeenCalled();
   });
 
   it('returns 404 when updating a missing Exam', async () => {
@@ -227,7 +185,7 @@ describe('ExamsService', () => {
 
   it('publishes only DRAFT exams and sets publishedAt server-side', async () => {
     prisma.exam.findUnique.mockResolvedValue({
-      id: 'exam-1', subjectId: 'subject-1', status: ExamStatus.DRAFT,
+      id: 'exam-1', status: ExamStatus.DRAFT,
     });
     prisma.exam.update.mockResolvedValue({ ...exam, status: ExamStatus.PUBLISHED });
 
@@ -244,7 +202,7 @@ describe('ExamsService', () => {
     'rejects publishing an %s exam',
     async (status) => {
       prisma.exam.findUnique.mockResolvedValue({
-        id: 'exam-1', subjectId: 'subject-1', status,
+        id: 'exam-1', status,
       });
 
       await expect(service.publish('exam-1')).rejects.toBeInstanceOf(
@@ -255,7 +213,7 @@ describe('ExamsService', () => {
 
   it('unpublishes only PUBLISHED exams and clears publishedAt', async () => {
     prisma.exam.findUnique.mockResolvedValue({
-      id: 'exam-1', subjectId: 'subject-1', status: ExamStatus.PUBLISHED,
+      id: 'exam-1', status: ExamStatus.PUBLISHED,
     });
     prisma.exam.update.mockResolvedValue(exam);
 
@@ -272,7 +230,7 @@ describe('ExamsService', () => {
     'rejects unpublishing an %s exam',
     async (status) => {
       prisma.exam.findUnique.mockResolvedValue({
-        id: 'exam-1', subjectId: 'subject-1', status,
+        id: 'exam-1', status,
       });
 
       await expect(service.unpublish('exam-1')).rejects.toBeInstanceOf(

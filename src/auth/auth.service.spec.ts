@@ -127,6 +127,28 @@ describe('AuthService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
       expect(prisma.user.create).not.toHaveBeenCalled();
     });
+
+    it('registers successfully with only the required fields', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+      hashMock.mockResolvedValue('new-password-hash');
+      prisma.user.create.mockResolvedValue({
+        ...safeUser,
+        phone: null,
+        dateOfBirth: null,
+      });
+
+      await service.register({
+        email: 'new@example.com',
+        password: 'password123',
+        fullName: 'New Student',
+      });
+
+      expect(prisma.user.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ phone: null, dateOfBirth: null }),
+        }),
+      );
+    });
   });
 
   describe('login', () => {

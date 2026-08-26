@@ -158,7 +158,7 @@ active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như F
 
 ## 5. Exams Module
 
-Exams module quản lý đề thi theo môn học. Exam bắt buộc thuộc một Subject đang active khi tạo hoặc đổi Subject.
+Exams module quản lý đề thi độc lập với Subject. Mỗi Question trong đề thi bắt buộc thuộc một Subject đang active.
 
 Đề thi hỗ trợ các trạng thái:
 
@@ -182,11 +182,11 @@ Hỗ trợ lọc đề thi theo trạng thái:
 
 `GET /api/exams?status=DRAFT`
 
-Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`; Admin có thể lọc mọi trạng thái. Exam trả về thông tin Subject và số lượng liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. Exam chỉ được xóa khi chưa có Questions, Assignments hoặc Attempts.
+Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`; Admin có thể lọc mọi trạng thái. Exam trả về số lượng câu hỏi và dữ liệu liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. DELETE Exam là soft delete: đề thi, câu hỏi, assignments và attempts liên quan không còn xuất hiện qua các API thông thường.
 
 ## 6. Questions Module
 
-Questions module quản lý câu hỏi trong đề thi.
+Questions module quản lý câu hỏi trong đề thi. Khi tạo hoặc đổi câu hỏi, `subjectId` phải trỏ tới một Subject đang active; một Exam có thể chứa câu hỏi thuộc nhiều Subject khác nhau.
 
 | Method | Endpoint                   | Mô tả                        | Quyền         | Trạng thái |
 | ------ | -------------------------- | ---------------------------- | ------------- | ---------- |

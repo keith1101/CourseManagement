@@ -4,15 +4,11 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
-  IsUUID,
   Min,
 } from 'class-validator';
 import { AccessLevel } from '../../../generated/client/enums';
 
 export class CreateExamDto {
-  @IsUUID()
-  subjectId!: string;
-
   @IsString()
   @IsNotEmpty()
   title!: string;

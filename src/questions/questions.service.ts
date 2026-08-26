@@ -39,13 +39,22 @@ export class QuestionsService {
     constructor(private readonly prismaService: PrismaService) {}
 
     async create(examId: string, createQuestionDto: CreateQuestionDto) {
-        const exam = await this.prismaService.exam.findUnique({
-            where: { id: examId, deletedAt: null },
-            select: { id: true },
-        });
+        const [exam, subject] = await Promise.all([
+            this.prismaService.exam.findUnique({
+                where: { id: examId, deletedAt: null },
+                select: { id: true },
+            }),
+            this.prismaService.subject.findUnique({
+                where: { id: createQuestionDto.subjectId },
+                select: { id: true, isActive: true },
+            }),
+        ]);
 
         if (!exam) {
             throw new NotFoundException('Exam not found');
+        }
+        if (!subject || !subject.isActive) {
+            throw new NotFoundException('Subject not found');
         }
 
         return this.prismaService.$transaction(async (transaction) => {
@@ -59,6 +68,7 @@ export class QuestionsService {
             const question = await transaction.question.create({
                 data: {
                     examId,
+                    subjectId: createQuestionDto.subjectId,
                     questionType: createQuestionDto.questionType,
                     contentText: createQuestionDto.contentText,
                     imageUrl: createQuestionDto.imageUrl,
@@ -131,6 +141,10 @@ export class QuestionsService {
     async update(id: string, updateQuestionsDto: UpdateQuestionsDto) {
         const existing = await this.find(id, true);
 
+        if (updateQuestionsDto.subjectId !== undefined) {
+            await this.ensureActiveSubject(updateQuestionsDto.subjectId);
+        }
+
         return this.prismaService.$transaction(async (transaction) => {
             const { options, ...questionData } = updateQuestionsDto;
 
@@ -169,6 +183,7 @@ export class QuestionsService {
             where: {
                 id,
                 deletedAt: null,
+                exam: { is: { deletedAt: null } },
             },
         });
 
@@ -245,6 +260,7 @@ export class QuestionsService {
             where: {
                 id,
                 deletedAt: null,
+                exam: { is: { deletedAt: null } },
             },
         });
 
@@ -340,5 +356,16 @@ export class QuestionsService {
         return this.prismaService.questionOption.delete({
             where: { id: optionId },
         });
+    }
+
+    private async ensureActiveSubject(subjectId: string) {
+        const subject = await this.prismaService.subject.findUnique({
+            where: { id: subjectId },
+            select: { id: true, isActive: true },
+        });
+
+        if (!subject || !subject.isActive) {
+            throw new NotFoundException('Subject not found');
+        }
     }
 }

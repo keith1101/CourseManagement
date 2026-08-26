@@ -362,7 +362,6 @@ async function main() {
       await tx.exam.upsert({
         where: { id: IDS.draftExam },
         update: {
-          subjectId: IDS.mathSubject,
           title: 'TEST_Exam_Draft_Free',
           description: 'Draft exam for Admin API tests',
           status: ExamStatus.DRAFT,
@@ -373,7 +372,6 @@ async function main() {
         },
         create: {
           id: IDS.draftExam,
-          subjectId: IDS.mathSubject,
           title: 'TEST_Exam_Draft_Free',
           description: 'Draft exam for Admin API tests',
           status: ExamStatus.DRAFT,
@@ -387,7 +385,6 @@ async function main() {
       await tx.exam.upsert({
         where: { id: IDS.freeExam },
         update: {
-          subjectId: IDS.mathSubject,
           title: 'TEST_Exam_Published_Free',
           description: 'Published free exam for Student API tests',
           status: ExamStatus.PUBLISHED,
@@ -398,7 +395,6 @@ async function main() {
         },
         create: {
           id: IDS.freeExam,
-          subjectId: IDS.mathSubject,
           title: 'TEST_Exam_Published_Free',
           description: 'Published free exam for Student API tests',
           status: ExamStatus.PUBLISHED,
@@ -412,7 +408,6 @@ async function main() {
       await tx.exam.upsert({
         where: { id: IDS.proExam },
         update: {
-          subjectId: IDS.scienceSubject,
           title: 'TEST_Exam_Published_Pro',
           description: 'Published Pro exam for access-level tests',
           status: ExamStatus.PUBLISHED,
@@ -423,7 +418,6 @@ async function main() {
         },
         create: {
           id: IDS.proExam,
-          subjectId: IDS.scienceSubject,
           title: 'TEST_Exam_Published_Pro',
           description: 'Published Pro exam for access-level tests',
           status: ExamStatus.PUBLISHED,
@@ -438,6 +432,7 @@ async function main() {
         where: { id: IDS.multipleChoiceQuestion },
         update: {
           examId: IDS.freeExam,
+          subjectId: IDS.mathSubject,
           questionType: QuestionType.MULTIPLE_CHOICE,
           contentText: 'TEST_Which city is the capital of France?',
           imageUrl: null,
@@ -451,6 +446,7 @@ async function main() {
         create: {
           id: IDS.multipleChoiceQuestion,
           examId: IDS.freeExam,
+          subjectId: IDS.mathSubject,
           questionType: QuestionType.MULTIPLE_CHOICE,
           contentText: 'TEST_Which city is the capital of France?',
           instruction: 'TEST_Select one option',
@@ -464,6 +460,7 @@ async function main() {
         where: { id: IDS.shortAnswerQuestion },
         update: {
           examId: IDS.freeExam,
+          subjectId: IDS.mathSubject,
           questionType: QuestionType.SHORT_ANSWER,
           contentText: 'TEST_Write the capital of Vietnam.',
           imageUrl: null,
@@ -477,6 +474,7 @@ async function main() {
         create: {
           id: IDS.shortAnswerQuestion,
           examId: IDS.freeExam,
+          subjectId: IDS.mathSubject,
           questionType: QuestionType.SHORT_ANSWER,
           contentText: 'TEST_Write the capital of Vietnam.',
           instruction: 'TEST_Use a short text answer',
@@ -491,6 +489,7 @@ async function main() {
         where: { id: IDS.proQuestion },
         update: {
           examId: IDS.proExam,
+          subjectId: IDS.scienceSubject,
           questionType: QuestionType.MULTIPLE_CHOICE,
           contentText: 'TEST_Which planet is known as the Red Planet?',
           imageUrl: null,
@@ -504,6 +503,7 @@ async function main() {
         create: {
           id: IDS.proQuestion,
           examId: IDS.proExam,
+          subjectId: IDS.scienceSubject,
           questionType: QuestionType.MULTIPLE_CHOICE,
           contentText: 'TEST_Which planet is known as the Red Planet?',
           instruction: 'TEST_Select one option',

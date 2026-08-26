@@ -28,6 +28,7 @@ describe('QuestionsService', () => {
     };
     prisma = {
       exam: { findUnique: jest.fn() },
+      subject: { findUnique: jest.fn() },
       question: {
         findFirst: jest.fn(),
         findMany: jest.fn(),
@@ -51,6 +52,7 @@ describe('QuestionsService', () => {
     await expect(
       service.create('missing-exam', {
         questionType: QuestionType.MULTIPLE_CHOICE,
+        subjectId: 'subject-1',
         contentText: 'Question',
         timeLimitSeconds: 30,
       }),
@@ -60,6 +62,7 @@ describe('QuestionsService', () => {
 
   it('creates a question and its options in one transaction', async () => {
     prisma.exam.findUnique.mockResolvedValue({ id: 'exam-1' });
+    prisma.subject.findUnique.mockResolvedValue({ id: 'subject-1', isActive: true });
     transaction.question.count.mockResolvedValue(2);
     transaction.question.create.mockResolvedValue({ id: 'question-1' });
     transaction.questionOption.createMany.mockResolvedValue({ count: 2 });
@@ -71,6 +74,7 @@ describe('QuestionsService', () => {
     await expect(
       service.create('exam-1', {
         questionType: QuestionType.MULTIPLE_CHOICE,
+        subjectId: 'subject-1',
         contentText: 'Question',
         timeLimitSeconds: 30,
         options: [

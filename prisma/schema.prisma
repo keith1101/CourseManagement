@@ -49,8 +49,8 @@ model User {
   id              String           @id @default(uuid())
   fullName        String
   email           String           @unique
-  phone           String
-  dateOfBirth     DateTime
+  phone           String?
+  dateOfBirth     DateTime?
   passwordHash    String
   role            UserRole         @default(STUDENT)
   isActive        Boolean          @default(true)
@@ -85,7 +85,7 @@ model Subject {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   materials    Material[]
-  exams        Exam[]
+  questions    Question[]
 }
 
 model Material {
@@ -108,8 +108,6 @@ model Material {
 
 model Exam {
   id              String           @id @default(uuid())
-  subjectId       String
-  subject         Subject          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
   title           String
   description     String?
   status          ExamStatus       @default(DRAFT)
@@ -122,14 +120,14 @@ model Exam {
   questions       Question[]
   examAssignments ExamAssignment[]
   examAttempts    ExamAttempt[]
-
-  @@index([subjectId])
 }
 
 model Question {
   id                      String                   @id @default(uuid())
   examId                  String
   exam                    Exam                     @relation(fields: [examId], references: [id])
+  subjectId               String
+  subject                 Subject                  @relation(fields: [subjectId], references: [id], onDelete: Restrict)
   questionType            QuestionType
   contentText             String
   imageUrl                String?
@@ -144,6 +142,8 @@ model Question {
   questionOptions         QuestionOption[]
   questionAcceptedAnswers QuestionAcceptedAnswer[]
   attemptAnswers          AttemptAnswer[]
+
+  @@index([subjectId])
 }
 
 model QuestionOption {

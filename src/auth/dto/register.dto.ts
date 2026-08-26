@@ -2,6 +2,7 @@ import {
   IsDateString,
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   MinLength,
 } from 'class-validator';
@@ -26,12 +27,13 @@ export class RegisterDto {
     fullName!: string;
 
     @Transform(({ value }: { value: unknown }) =>
-        typeof value === 'string' ? value.trim() : value,
+        typeof value === 'string' && value.trim() ? value.trim() : undefined,
     )
+    @IsOptional()
     @IsString()
-    @IsNotEmpty()
-    phone!: string;
+    phone?: string;
 
+    @IsOptional()
     @IsDateString()
-    dateOfBirth!: string;
+    dateOfBirth?: string;
 }

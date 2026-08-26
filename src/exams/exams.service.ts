@@ -12,16 +12,6 @@ import { ExamQueryDto } from './dto/exam-query.dto';
 import { UpdateExamDto } from './dto/update-exam.dto';
 
 const examInclude = {
-  subject: {
-    select: {
-      id: true,
-      code: true,
-      name: true,
-      description: true,
-      displayOrder: true,
-      isActive: true,
-    },
-  },
   _count: {
     select: {
       questions: {
@@ -43,24 +33,17 @@ export class ExamsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createExamDto: CreateExamDto) {
-    await this.ensureActiveSubject(createExamDto.subjectId);
-
-    try {
-      return await this.prisma.exam.create({
-        data: {
-          subjectId: createExamDto.subjectId,
-          title: createExamDto.title.trim(),
-          description: createExamDto.description,
-          accessLevel: createExamDto.accessLevel ?? AccessLevel.FREE,
-          displayOrder: createExamDto.displayOrder ?? 0,
-          status: ExamStatus.DRAFT,
-          publishedAt: null,
-        },
-        include: examInclude,
-      });
-    } catch (error) {
-      this.handleSubjectForeignKeyError(error);
-    }
+    return this.prisma.exam.create({
+      data: {
+        title: createExamDto.title.trim(),
+        description: createExamDto.description,
+        accessLevel: createExamDto.accessLevel ?? AccessLevel.FREE,
+        displayOrder: createExamDto.displayOrder ?? 0,
+        status: ExamStatus.DRAFT,
+        publishedAt: null,
+      },
+      include: examInclude,
+    });
   }
 
   async findAll(query: ExamQueryDto, viewer: Viewer) {
@@ -127,23 +110,11 @@ export class ExamsService {
     if (updateExamDto.displayOrder !== undefined) {
       data.displayOrder = updateExamDto.displayOrder;
     }
-    if (
-      updateExamDto.subjectId !== undefined &&
-      updateExamDto.subjectId !== existing.subjectId
-    ) {
-      await this.ensureActiveSubject(updateExamDto.subjectId);
-      data.subjectId = updateExamDto.subjectId;
-    }
-
-    try {
-      return await this.prisma.exam.update({
-        where: { id },
-        data,
-        include: examInclude,
-      });
-    } catch (error) {
-      this.handleSubjectForeignKeyError(error);
-    }
+    return this.prisma.exam.update({
+      where: { id },
+      data,
+      include: examInclude,
+    });
   }
 
   async publish(id: string) {
@@ -208,7 +179,7 @@ export class ExamsService {
   private async getExamForAdmin(id: string) {
     const exam = await this.prisma.exam.findUnique({
       where: { id, deletedAt: null },
-      select: { id: true, subjectId: true, status: true },
+      select: { id: true, status: true },
     });
 
     if (!exam) {
@@ -216,17 +187,6 @@ export class ExamsService {
     }
 
     return exam;
-  }
-
-  private async ensureActiveSubject(subjectId: string) {
-    const subject = await this.prisma.subject.findUnique({
-      where: { id: subjectId },
-      select: { id: true, isActive: true },
-    });
-
-    if (!subject || !subject.isActive) {
-      throw new NotFoundException('Subject not found');
-    }
   }
 
   private async getStudentAccess(userId: string) {
@@ -250,14 +210,4 @@ export class ExamsService {
     };
   }
 
-  private handleSubjectForeignKeyError(error: unknown): never {
-    if (
-      error instanceof Prisma.PrismaClientKnownRequestError &&
-      error.code === 'P2003'
-    ) {
-      throw new NotFoundException('Subject not found');
-    }
-
-    throw error;
-  }
 }
