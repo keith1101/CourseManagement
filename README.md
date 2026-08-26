@@ -48,6 +48,9 @@ pnpm install
 pnpm db:generate
 pnpm db:migrate
 
+# Chỉ dùng cho database development/test đã được xác nhận
+pnpm db:seed
+
 # Chạy development server
 pnpm dev
 
@@ -63,6 +66,18 @@ pnpm start:prod
 ```
 
 `pnpm db:migrate` dành cho development. Khi deploy production, dùng `pnpm db:deploy` để chỉ áp dụng các migration đã được tạo và kiểm tra.
+
+### Seed dữ liệu kiểm thử
+
+Seed chỉ chạy khi có đủ các biến môi trường sau trong phiên shell cục bộ:
+
+```text
+ALLOW_TEST_SEED=true
+SEED_ADMIN_PASSWORD=<mật khẩu test cục bộ>
+SEED_STUDENT_PASSWORD=<mật khẩu test cục bộ>
+```
+
+Seed dùng tài khoản và dữ liệu có tiền tố `TEST_`, chạy theo kiểu idempotent và không xóa dữ liệu ngoài phạm vi seed. Không ghi mật khẩu hoặc credentials thật vào repository. Không chạy `pnpm db:seed` trên production hoặc Cloud SQL nếu chưa có xác nhận rõ ràng.
 
 
 # Thiết kế API

@@ -1,16 +1,9 @@
-/*
-  Warnings:
+-- CreateSchema
+CREATE SCHEMA IF NOT EXISTS "public";
 
-  - The primary key for the `Subject` table will be changed. If it partially fails, the table could be left without primary key constraint.
-  - The primary key for the `User` table will be changed. If it partially fails, the table could be left without primary key constraint.
-  - You are about to drop the column `isPro` on the `User` table. All the data in the column will be lost.
-  - You are about to drop the `Course` table. If the table is not empty, all the data it contains will be lost.
-  - Added the required column `displayOrder` to the `Subject` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `dateOfBirth` to the `User` table without a default value. This is not possible if the table is not empty.
-  - Added the required column `phone` to the `User` table without a default value. This is not possible if the table is not empty.
-  - Made the column `fullName` on table `User` required. This step will fail if there are existing NULL values in that column.
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('ADMIN', 'STUDENT');
 
-*/
 -- CreateEnum
 CREATE TYPE "AccessLevel" AS ENUM ('FREE', 'PRO');
 
@@ -29,29 +22,24 @@ CREATE TYPE "AnswerValueType" AS ENUM ('TEXT', 'NUMBER');
 -- CreateEnum
 CREATE TYPE "AttemptStatus" AS ENUM ('IN_PROGRESS', 'COMPLETED', 'ABANDONED');
 
--- AlterTable
-ALTER TABLE "Subject" DROP CONSTRAINT "Subject_pkey",
-ADD COLUMN     "displayOrder" INTEGER NOT NULL,
-ALTER COLUMN "id" DROP DEFAULT,
-ALTER COLUMN "id" SET DATA TYPE TEXT,
-ADD CONSTRAINT "Subject_pkey" PRIMARY KEY ("id");
-DROP SEQUENCE "Subject_id_seq";
+-- CreateTable
+CREATE TABLE "User" (
+    "id" TEXT NOT NULL,
+    "fullName" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "phone" TEXT NOT NULL,
+    "dateOfBirth" TIMESTAMP(3) NOT NULL,
+    "passwordHash" TEXT NOT NULL,
+    "role" "UserRole" NOT NULL DEFAULT 'STUDENT',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "accessLevel" "AccessLevel" NOT NULL DEFAULT 'FREE',
+    "lastLoginAt" TIMESTAMP(3),
+    "proExpiresAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
--- AlterTable
-ALTER TABLE "User" DROP CONSTRAINT "User_pkey",
-DROP COLUMN "isPro",
-ADD COLUMN     "accessLevel" "AccessLevel" NOT NULL DEFAULT 'FREE',
-ADD COLUMN     "dateOfBirth" TIMESTAMP(3) NOT NULL,
-ADD COLUMN     "lastLoginAt" TIMESTAMP(3),
-ADD COLUMN     "phone" TEXT NOT NULL,
-ALTER COLUMN "id" DROP DEFAULT,
-ALTER COLUMN "id" SET DATA TYPE TEXT,
-ALTER COLUMN "fullName" SET NOT NULL,
-ADD CONSTRAINT "User_pkey" PRIMARY KEY ("id");
-DROP SEQUENCE "User_id_seq";
-
--- DropTable
-DROP TABLE "Course";
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateTable
 CREATE TABLE "Subscription" (
@@ -64,6 +52,20 @@ CREATE TABLE "Subscription" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Subscription_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Subject" (
+    "id" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "displayOrder" INTEGER NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Subject_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -89,6 +91,7 @@ CREATE TABLE "Material" (
 -- CreateTable
 CREATE TABLE "Exam" (
     "id" TEXT NOT NULL,
+    "subjectId" TEXT NOT NULL,
     "title" TEXT NOT NULL,
     "description" TEXT,
     "status" "ExamStatus" NOT NULL DEFAULT 'DRAFT',
@@ -186,7 +189,7 @@ CREATE TABLE "AttemptAnswer" (
     "id" TEXT NOT NULL,
     "attemptId" TEXT NOT NULL,
     "questionId" TEXT NOT NULL,
-    "selectedOptionId" TEXT NOT NULL,
+    "selectedOptionId" TEXT,
     "answerType" "AnswerValueType" NOT NULL,
     "rawValue" TEXT NOT NULL,
     "normalizedText" TEXT,
@@ -200,11 +203,23 @@ CREATE TABLE "AttemptAnswer" (
     CONSTRAINT "AttemptAnswer_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Subject_code_key" ON "Subject"("code");
+
+-- CreateIndex
+CREATE INDEX "Exam_subjectId_idx" ON "Exam"("subjectId");
+
 -- AddForeignKey
 ALTER TABLE "Subscription" ADD CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Material" ADD CONSTRAINT "Material_subjectId_fkey" FOREIGN KEY ("subjectId") REFERENCES "Subject"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Exam" ADD CONSTRAINT "Exam_subjectId_fkey" FOREIGN KEY ("subjectId") REFERENCES "Subject"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Question" ADD CONSTRAINT "Question_examId_fkey" FOREIGN KEY ("examId") REFERENCES "Exam"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -237,4 +252,4 @@ ALTER TABLE "AttemptAnswer" ADD CONSTRAINT "AttemptAnswer_attemptId_fkey" FOREIG
 ALTER TABLE "AttemptAnswer" ADD CONSTRAINT "AttemptAnswer_questionId_fkey" FOREIGN KEY ("questionId") REFERENCES "Question"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "AttemptAnswer" ADD CONSTRAINT "AttemptAnswer_selectedOptionId_fkey" FOREIGN KEY ("selectedOptionId") REFERENCES "QuestionOption"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "AttemptAnswer" ADD CONSTRAINT "AttemptAnswer_selectedOptionId_fkey" FOREIGN KEY ("selectedOptionId") REFERENCES "QuestionOption"("id") ON DELETE SET NULL ON UPDATE CASCADE;
