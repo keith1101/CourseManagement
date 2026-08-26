@@ -134,19 +134,27 @@ Các môn học mặc định:
 | PATCH  | `/api/subjects/:id` | Cập nhật môn học      | Admin         | Done       |
 | DELETE | `/api/subjects/:id` | Xóa mềm môn học       | Admin         | Done       |
 
-## 4. Documents Module
+## 4. Materials Module
 
-Documents module quản lý tài liệu học tập như PDF, DOCX, video và video nhúng.
+Materials quản lý metadata và liên kết tài liệu học tập. Backend hiện chưa upload
+binary hoặc tích hợp storage provider; `storageUrl` và `embedUrl` phải trỏ tới
+nguồn đã có sẵn.
 
-| Method | Endpoint         | Mô tả                       | Quyền         | Trạng thái |
-| ------ | ---------------- | --------------------------- | ------------- | ---------- |
-| POST   | `/api/documents`     | Thêm hoặc upload tài liệu   | Admin         | Planned    |
-| GET    | `/api/documents`     | Lấy danh sách tài liệu      | Student/Admin | Planned    |
-| GET    | `/api/documents/:id` | Xem chi tiết tài liệu       | Student/Admin | Planned    |
-| PATCH  | `/api/documents/:id` | Cập nhật thông tin tài liệu | Admin         | Planned    |
-| DELETE | `/api/documents/:id` | Xóa tài liệu                | Admin         | Planned    |
+| Method | Endpoint                         | Mô tả                         | Quyền         | Trạng thái |
+| ------ | -------------------------------- | ----------------------------- | ------------- | ---------- |
+| POST   | `/api/materials`                 | Tạo metadata tài liệu         | Admin         | Done       |
+| GET    | `/api/materials`                 | Lấy danh sách tài liệu        | Student/Admin | Done       |
+| GET    | `/api/materials/:id`             | Xem chi tiết tài liệu         | Student/Admin | Done       |
+| PATCH  | `/api/materials/:id`             | Cập nhật metadata/liên kết    | Admin         | Done       |
+| DELETE | `/api/materials/:id`             | Xóa metadata tài liệu         | Admin         | Done       |
+| PATCH  | `/api/materials/:id/publish`     | Công khai tài liệu            | Admin         | Done       |
+| PATCH  | `/api/materials/:id/unpublish`   | Ẩn tài liệu                   | Admin         | Done       |
 
-Ghi chú: Học sinh chỉ xem tài liệu online, không tải trực tiếp.
+Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
+
+`PDF` và `DOCX` cần `storageUrl` hợp lệ; `EMBEDDED_VIDEO` cần `embedUrl` hợp lệ.
+Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
+active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
 
 ## 5. Exams Module
 
@@ -257,7 +265,7 @@ Nếu học sinh trả lời sai hoặc hết giờ, hệ thống có thể hi�
 1. Auth
 2. Users
 3. Subjects
-4. Documents
+4. Materials
 5. Exams
 6. Questions
 7. Assignments
