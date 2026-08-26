@@ -48,6 +48,9 @@ pnpm install
 pnpm db:generate
 pnpm db:migrate
 
+# Chỉ dùng cho database development/test đã được xác nhận
+pnpm db:seed
+
 # Chạy development server
 pnpm dev
 
@@ -63,6 +66,18 @@ pnpm start:prod
 ```
 
 `pnpm db:migrate` dành cho development. Khi deploy production, dùng `pnpm db:deploy` để chỉ áp dụng các migration đã được tạo và kiểm tra.
+
+### Seed dữ liệu kiểm thử
+
+Seed chỉ chạy khi có đủ các biến môi trường sau trong phiên shell cục bộ:
+
+```text
+ALLOW_TEST_SEED=true
+SEED_ADMIN_PASSWORD=<mật khẩu test cục bộ>
+SEED_STUDENT_PASSWORD=<mật khẩu test cục bộ>
+```
+
+Seed dùng tài khoản và dữ liệu có tiền tố `TEST_`, chạy theo kiểu idempotent và không xóa dữ liệu ngoài phạm vi seed. Không ghi mật khẩu hoặc credentials thật vào repository. Không chạy `pnpm db:seed` trên production hoặc Cloud SQL nếu chưa có xác nhận rõ ràng.
 
 
 # Thiết kế API
@@ -119,44 +134,55 @@ Các môn học mặc định:
 | PATCH  | `/api/subjects/:id` | Cập nhật môn học      | Admin         | Done       |
 | DELETE | `/api/subjects/:id` | Xóa mềm môn học       | Admin         | Done       |
 
-## 4. Documents Module
+## 4. Materials Module
 
-Documents module quản lý tài liệu học tập như PDF, DOCX, video và video nhúng.
+Materials quản lý metadata và liên kết tài liệu học tập. Backend hiện chưa upload
+binary hoặc tích hợp storage provider; `storageUrl` và `embedUrl` phải trỏ tới
+nguồn đã có sẵn.
 
-| Method | Endpoint         | Mô tả                       | Quyền         | Trạng thái |
-| ------ | ---------------- | --------------------------- | ------------- | ---------- |
-| POST   | `/api/documents`     | Thêm hoặc upload tài liệu   | Admin         | Planned    |
-| GET    | `/api/documents`     | Lấy danh sách tài liệu      | Student/Admin | Planned    |
-| GET    | `/api/documents/:id` | Xem chi tiết tài liệu       | Student/Admin | Planned    |
-| PATCH  | `/api/documents/:id` | Cập nhật thông tin tài liệu | Admin         | Planned    |
-| DELETE | `/api/documents/:id` | Xóa tài liệu                | Admin         | Planned    |
+| Method | Endpoint                         | Mô tả                         | Quyền         | Trạng thái |
+| ------ | -------------------------------- | ----------------------------- | ------------- | ---------- |
+| POST   | `/api/materials`                 | Tạo metadata tài liệu         | Admin         | Done       |
+| GET    | `/api/materials`                 | Lấy danh sách tài liệu        | Student/Admin | Done       |
+| GET    | `/api/materials/:id`             | Xem chi tiết tài liệu         | Student/Admin | Done       |
+| PATCH  | `/api/materials/:id`             | Cập nhật metadata/liên kết    | Admin         | Done       |
+| DELETE | `/api/materials/:id`             | Xóa metadata tài liệu         | Admin         | Done       |
+| PATCH  | `/api/materials/:id/publish`     | Công khai tài liệu            | Admin         | Done       |
+| PATCH  | `/api/materials/:id/unpublish`   | Ẩn tài liệu                   | Admin         | Done       |
 
-Ghi chú: Học sinh chỉ xem tài liệu online, không tải trực tiếp.
+Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
+
+`PDF` và `DOCX` cần `storageUrl` hợp lệ; `EMBEDDED_VIDEO` cần `embedUrl` hợp lệ.
+Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
+active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
 
 ## 5. Exams Module
 
-Exams module quản lý đề thi.
+Exams module quản lý đề thi theo môn học. Exam bắt buộc thuộc một Subject đang active khi tạo hoặc đổi Subject.
 
 Đề thi hỗ trợ các trạng thái:
 
 * DRAFT
 * PUBLISHED
+* ARCHIVED (dành cho mở rộng sau, hiện chưa có endpoint archive)
 
 | Method | Endpoint               | Mô tả                              | Quyền         | Trạng thái |
 | ------ | ---------------------- | ---------------------------------- | ------------- | ---------- |
-| POST   | `/api/exams`               | Tạo đề thi                         | Admin         | Planned    |
-| GET    | `/api/exams`               | Lấy danh sách đề thi               | Student/Admin | Planned    |
-| GET    | `/api/exams/:id`           | Xem chi tiết đề thi                | Student/Admin | Planned    |
-| PATCH  | `/api/exams/:id`           | Cập nhật đề thi                    | Admin         | Planned    |
-| DELETE | `/api/exams/:id`           | Xóa đề thi                         | Admin         | Planned    |
-| PATCH  | `/api/exams/:id/publish`   | Công khai đề thi                   | Admin         | Planned    |
-| PATCH  | `/api/exams/:id/unpublish` | Chuyển đề thi về trạng thái Draft | Admin         | Planned    |
+| POST   | `/api/exams`               | Tạo đề thi                         | Admin         | Done       |
+| GET    | `/api/exams`               | Lấy danh sách đề thi               | Student/Admin | Done       |
+| GET    | `/api/exams/:id`           | Xem chi tiết đề thi                | Student/Admin | Done       |
+| PATCH  | `/api/exams/:id`           | Cập nhật đề thi                    | Admin         | Done       |
+| DELETE | `/api/exams/:id`           | Xóa đề thi                         | Admin         | Done       |
+| PATCH  | `/api/exams/:id/publish`   | Công khai đề thi                   | Admin         | Done       |
+| PATCH  | `/api/exams/:id/unpublish` | Chuyển đề thi về trạng thái Draft | Admin         | Done       |
 
 Hỗ trợ lọc đề thi theo trạng thái:
 
 `GET /api/exams?status=PUBLISHED`
 
 `GET /api/exams?status=DRAFT`
+
+Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`; Admin có thể lọc mọi trạng thái. Exam trả về thông tin Subject và số lượng liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. Exam chỉ được xóa khi chưa có Questions, Assignments hoặc Attempts.
 
 ## 6. Questions Module
 
@@ -239,7 +265,7 @@ Nếu học sinh trả lời sai hoặc hết giờ, hệ thống có thể hi�
 1. Auth
 2. Users
 3. Subjects
-4. Documents
+4. Materials
 5. Exams
 6. Questions
 7. Assignments

@@ -85,6 +85,7 @@ model Subject {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   materials    Material[]
+  exams        Exam[]
 }
 
 model Material {
@@ -107,6 +108,8 @@ model Material {
 
 model Exam {
   id              String           @id @default(uuid())
+  subjectId       String
+  subject         Subject          @relation(fields: [subjectId], references: [id], onDelete: Restrict)
   title           String
   description     String?
   status          ExamStatus       @default(DRAFT)
@@ -118,6 +121,8 @@ model Exam {
   questions       Question[]
   examAssignments ExamAssignment[]
   examAttempts    ExamAttempt[]
+
+  @@index([subjectId])
 }
 
 model Question {

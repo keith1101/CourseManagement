@@ -8,6 +8,8 @@ import { QuestionsModule } from './questions/questions.module';
 import { SubjectsModule } from './subjects/subjects.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { AttemptsModule } from './attempts/attempts.module';
+import { ExamsModule } from './exams/exams.module';
+import { MaterialsModule } from './materials/materials.module';
 
 @Module({
   imports: [
@@ -21,6 +23,8 @@ import { AttemptsModule } from './attempts/attempts.module';
     SubjectsModule,
     AssignmentsModule,
     AttemptsModule,
+    ExamsModule,
+    MaterialsModule,
   ],
   controllers: [AppController],
 })
