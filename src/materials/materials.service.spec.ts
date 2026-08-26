@@ -36,6 +36,7 @@ describe('MaterialsService', () => {
 
   let service: MaterialsService;
   let prisma: any;
+  let gcsStorage: any;
 
   beforeEach(() => {
     prisma = {
@@ -50,7 +51,12 @@ describe('MaterialsService', () => {
         delete: jest.fn(),
       },
     };
-    service = new MaterialsService(prisma as PrismaService);
+    gcsStorage = {
+      upload: jest.fn(),
+      delete: jest.fn(),
+      getSignedReadUrl: jest.fn(),
+    };
+    service = new MaterialsService(prisma as PrismaService, gcsStorage);
   });
 
   it('creates a PDF unpublished and server-controls publish fields', async () => {
@@ -106,6 +112,41 @@ describe('MaterialsService', () => {
         fileSizeBytes: null,
         embedUrl: 'https://example.com/embed/video',
         isPublished: false,
+      }),
+    );
+  });
+
+  it('uploads a PDF to Cloud Storage and saves its metadata', async () => {
+    prisma.subject.findUnique.mockResolvedValue(activeSubject);
+    gcsStorage.upload.mockResolvedValue({
+      objectName: 'materials/subject-1/file.pdf',
+      gsUri: 'gs://course-media-bucket/materials/subject-1/file.pdf',
+    });
+    prisma.material.create.mockResolvedValue(pdf);
+
+    await service.upload(
+      {
+        buffer: Buffer.from('pdf'),
+        originalname: 'lesson.pdf',
+        mimetype: 'application/pdf',
+        size: 3,
+      },
+      {
+        subjectId: 'subject-1',
+        title: 'Lesson PDF',
+        accessLevel: AccessLevel.FREE,
+      },
+    );
+
+    expect(gcsStorage.upload).toHaveBeenCalledWith(
+      expect.objectContaining({ originalname: 'lesson.pdf' }),
+      expect.stringMatching(/^materials\/subject-1\//),
+    );
+    expect(prisma.material.create.mock.calls[0][0].data).toEqual(
+      expect.objectContaining({
+        materialType: MaterialType.PDF,
+        storageUrl: 'gs://course-media-bucket/materials/subject-1/file.pdf',
+        fileSizeBytes: 3,
       }),
     );
   });
@@ -366,13 +407,29 @@ describe('MaterialsService', () => {
   });
 
   it('deletes a material and returns 404 for a missing material', async () => {
-    prisma.material.findUnique.mockResolvedValueOnce({ id: 'material-1' });
+    prisma.material.findUnique.mockResolvedValueOnce({ id: 'material-1', storageUrl: pdf.storageUrl });
     prisma.material.delete.mockResolvedValue(pdf);
     await expect(service.remove('material-1')).resolves.toBe(pdf);
+    expect(gcsStorage.delete).not.toHaveBeenCalled();
 
     prisma.material.findUnique.mockResolvedValueOnce(null);
     await expect(service.remove('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+
+  it('deletes a Cloud Storage object before deleting its material record', async () => {
+    const storageUrl = 'gs://course-media-bucket/materials/subject-1/file.pdf';
+    prisma.material.findUnique.mockResolvedValueOnce({
+      id: 'material-1',
+      storageUrl,
+    });
+    gcsStorage.delete.mockResolvedValue(undefined);
+    prisma.material.delete.mockResolvedValue(pdf);
+
+    await service.remove('material-1');
+
+    expect(gcsStorage.delete).toHaveBeenCalledWith(storageUrl);
+    expect(prisma.material.delete).toHaveBeenCalledWith({ where: { id: 'material-1' } });
   });
 });

@@ -156,6 +156,34 @@ Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
 Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
 active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
 
+### Upload file lên Google Cloud Storage
+
+Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với
+`multipart/form-data`:
+
+| Field | Bắt buộc | Mô tả |
+| ----- | -------- | ----- |
+| `file` | Có | File PDF hoặc DOCX, tối đa 25 MB |
+| `subjectId` | Có | Subject đang active |
+| `title` | Có | Tên tài liệu |
+| `accessLevel` | Có | `FREE` hoặc `PRO` |
+
+File được lưu private trong bucket qua `GCS_BUCKET_NAME`; database chỉ lưu
+`gs://...` và metadata file. Dùng `GET /api/materials/:id/download` để nhận
+Signed URL có thời hạn 15 phút. Video nhúng vẫn dùng `embedUrl` như cũ.
+
+Cấu hình backend qua `.env`:
+
+```env
+GCP_PROJECT_ID=course-management-2026
+GCS_BUCKET_NAME=course-media-bucket
+GOOGLE_APPLICATION_CREDENTIALS=C:/secure/course-media-uploader.json
+```
+
+Local development có thể dùng ADC hoặc Service Account key đặt ngoài repository.
+Khi chạy trên Google Cloud, nên attach Service Account vào Cloud Run/Compute
+thay vì lưu key trong ứng dụng.
+
 ## 5. Exams Module
 
 Exams module quản lý đề thi độc lập với Subject. Mỗi Question trong đề thi bắt buộc thuộc một Subject đang active.

@@ -264,6 +264,13 @@ export class AttemptsService {
                 startedAt: true,
                 createdAt: true,
                 updatedAt: true,
+                user: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                        email: true,
+                    },
+                },
                 exam: {
                     select: {
                         id: true,

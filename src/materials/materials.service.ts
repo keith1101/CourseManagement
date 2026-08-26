@@ -11,6 +11,12 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { MaterialQueryDto } from './dto/material-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
+import { UploadMaterialDto } from './dto/upload-material.dto';
+import {
+  GcsStorageService,
+  StorageUploadFile,
+} from '../storage/gcs-storage.service';
+import { randomUUID } from 'node:crypto';
 
 const materialInclude = {
   subject: {
@@ -41,7 +47,10 @@ type MaterialShape = {
 
 @Injectable()
 export class MaterialsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gcsStorage: GcsStorageService,
+  ) {}
 
   async create(createMaterialDto: CreateMaterialDto) {
     await this.ensureActiveSubject(createMaterialDto.subjectId);
@@ -77,6 +86,40 @@ export class MaterialsService {
         include: materialInclude,
       });
     } catch (error) {
+      this.handlePrismaError(error);
+    }
+  }
+
+  async upload(file: StorageUploadFile, uploadMaterialDto: UploadMaterialDto) {
+    await this.ensureActiveSubject(uploadMaterialDto.subjectId);
+
+    const title = uploadMaterialDto.title.trim();
+    if (!title) throw new BadRequestException('Title cannot be empty');
+
+    const materialType = this.detectUploadedMaterialType(file);
+    const safeFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const objectName = `materials/${uploadMaterialDto.subjectId}/${randomUUID()}-${safeFileName || 'file'}`;
+    const uploaded = await this.gcsStorage.upload(file, objectName);
+
+    try {
+      return await this.prisma.material.create({
+        data: {
+          subjectId: uploadMaterialDto.subjectId,
+          title,
+          materialType,
+          storageUrl: uploaded.gsUri,
+          embedUrl: null,
+          originalFileName: file.originalname,
+          mimeType: file.mimetype,
+          fileSizeBytes: file.size,
+          accessLevel: uploadMaterialDto.accessLevel,
+          isPublished: false,
+          publishedAt: null,
+        },
+        include: materialInclude,
+      });
+    } catch (error) {
+      await this.gcsStorage.delete(uploaded.gsUri).catch(() => undefined);
       this.handlePrismaError(error);
     }
   }
@@ -120,6 +163,28 @@ export class MaterialsService {
 
     if (!material) throw new NotFoundException('Material not found');
     return material;
+  }
+
+  async getDownloadUrl(id: string, viewer: Viewer) {
+    const material = await this.findOne(id, viewer);
+
+    if (
+      material.materialType === MaterialType.EMBEDDED_VIDEO ||
+      !material.storageUrl
+    ) {
+      throw new NotFoundException('Download is not available for this material');
+    }
+
+    const expiresInSeconds = 15 * 60;
+    const url = await this.gcsStorage.getSignedReadUrl(
+      material.storageUrl,
+      expiresInSeconds,
+    );
+
+    return {
+      url,
+      expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+    };
   }
 
   async update(id: string, updateMaterialDto: UpdateMaterialDto) {
@@ -232,9 +297,13 @@ export class MaterialsService {
   async remove(id: string) {
     const existing = await this.prisma.material.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, storageUrl: true },
     });
     if (!existing) throw new NotFoundException('Material not found');
+
+    if (existing.storageUrl?.startsWith('gs://')) {
+      await this.gcsStorage.delete(existing.storageUrl);
+    }
 
     try {
       return await this.prisma.material.delete({ where: { id } });
@@ -316,7 +385,7 @@ export class MaterialsService {
       return;
     }
 
-    if (!this.isHttpUrl(shape.storageUrl)) {
+    if (!this.isStorageUrl(shape.storageUrl)) {
       throw new BadRequestException(
         `${shape.materialType} materials require a valid storageUrl`,
       );
@@ -351,6 +420,28 @@ export class MaterialsService {
     } catch {
       return false;
     }
+  }
+
+  private isStorageUrl(value: string | null | undefined) {
+    return this.isHttpUrl(value) || /^gs:\/\/[^/]+\/.+/.test(value ?? '');
+  }
+
+  private detectUploadedMaterialType(file: StorageUploadFile) {
+    const mimeType = file.mimetype.toLowerCase();
+
+    if (mimeType === 'application/pdf') {
+      return MaterialType.PDF;
+    }
+
+    if (
+      mimeType ===
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimeType === 'application/msword'
+    ) {
+      return MaterialType.DOCX;
+    }
+
+    throw new BadRequestException('Only PDF and DOCX files can be uploaded');
   }
 
   private handlePrismaError(error: unknown): never {

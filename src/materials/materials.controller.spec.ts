@@ -37,7 +37,7 @@ describe('MaterialsController', () => {
       UserRole.STUDENT,
     ]);
 
-    for (const method of ['create', 'update', 'remove', 'publish', 'unpublish']) {
+    for (const method of ['create', 'upload', 'update', 'remove', 'publish', 'unpublish']) {
       const handler = (MaterialsController.prototype as unknown as Record<string, unknown>)[method];
       expect(Reflect.getMetadata(ROLES_KEY, handler as object)).toEqual([
         UserRole.ADMIN,

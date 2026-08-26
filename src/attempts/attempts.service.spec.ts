@@ -61,6 +61,29 @@ describe('AttemptsService', () => {
     expect(result).toEqual(expect.objectContaining({ id: 'attempt-1', questions: [] }));
   });
 
+  it('includes student identity when listing attempts', async () => {
+    const attempts = [
+      {
+        id: 'attempt-1',
+        userId: 'student-1',
+        user: { id: 'student-1', fullName: 'Nguyen Van A', email: 'student@example.com' },
+        exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
+      },
+    ];
+    prisma.examAttempt.findMany.mockResolvedValue(attempts);
+
+    await expect(service.findAll({} as any)).resolves.toBe(attempts);
+    expect(prisma.examAttempt.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          user: {
+            select: { id: true, fullName: true, email: true },
+          },
+        }),
+      }),
+    );
+  });
+
   it('allows a short answer with selectedOptionId set to null', async () => {
     prisma.examAttempt.findUnique.mockResolvedValue({
       id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
