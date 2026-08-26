@@ -111,7 +111,7 @@ export class AttemptsService {
     ) {
         const [exam, user] = await Promise.all([
             this.prisma.exam.findUnique({
-                where: { id: examId },
+                where: { id: examId, deletedAt: null },
                 select: {
                     id: true,
                     status: true,
@@ -149,7 +149,7 @@ export class AttemptsService {
         // BR-02: Free user is limited to the first 2 published exams
         if (!isPro) {
             const firstTwoExams = await this.prisma.exam.findMany({
-                where: { status: 'PUBLISHED' },
+                where: { status: 'PUBLISHED', deletedAt: null },
                 orderBy: [
                     { displayOrder: 'asc' },
                     { createdAt: 'asc' },
@@ -250,6 +250,7 @@ export class AttemptsService {
                 userId: effectiveUserId,
                 examId: query.examId,
                 status: query.status,
+                exam: { is: { deletedAt: null } },
             },
             select: {
                 id: true,
@@ -641,10 +642,17 @@ export class AttemptsService {
                 userId: true,
                 examId: true,
                 status: true,
+                exam: {
+                    select: { deletedAt: true },
+                },
             },
         });
 
-        if (!attempt || (userId && attempt.userId !== userId)) {
+        if (
+            !attempt ||
+            attempt.exam?.deletedAt ||
+            (userId && attempt.userId !== userId)
+        ) {
             throw new NotFoundException('Attempt not found');
         }
 

@@ -103,7 +103,7 @@ describe('ExamsService', () => {
 
     expect(prisma.exam.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { status: ExamStatus.ARCHIVED },
+        where: { status: ExamStatus.ARCHIVED, deletedAt: null },
         orderBy: [{ displayOrder: 'asc' }, { createdAt: 'desc' }],
       }),
     );
@@ -125,6 +125,7 @@ describe('ExamsService', () => {
     expect(prisma.exam.findMany.mock.calls[0][0].where).toEqual({
       status: ExamStatus.PUBLISHED,
       accessLevel: AccessLevel.FREE,
+      deletedAt: null,
     });
   });
 
@@ -140,6 +141,7 @@ describe('ExamsService', () => {
 
     expect(prisma.exam.findMany.mock.calls[0][0].where).toEqual({
       status: ExamStatus.PUBLISHED,
+      deletedAt: null,
     });
   });
 
@@ -158,6 +160,7 @@ describe('ExamsService', () => {
       id: 'exam-1',
       status: ExamStatus.PUBLISHED,
       accessLevel: AccessLevel.FREE,
+      deletedAt: null,
     });
   });
 
@@ -278,26 +281,46 @@ describe('ExamsService', () => {
     },
   );
 
-  it('rejects deletion when Questions, Assignments or Attempts exist', async () => {
-    prisma.exam.findUnique.mockResolvedValue({
+  it('soft deletes an exam even when Questions, Assignments or Attempts exist', async () => {
+    prisma.exam.findFirst.mockResolvedValue({
       id: 'exam-1',
-      _count: { questions: 1, examAssignments: 0, examAttempts: 0 },
+      deletedAt: null,
+    });
+    prisma.exam.update.mockResolvedValue({
+      ...exam,
+      status: ExamStatus.ARCHIVED,
+      publishedAt: null,
+      deletedAt: new Date(),
     });
 
-    await expect(service.remove('exam-1')).rejects.toBeInstanceOf(
-      ConflictException,
+    await expect(service.remove('exam-1')).resolves.toEqual(
+      expect.objectContaining({
+        status: ExamStatus.ARCHIVED,
+        deletedAt: expect.any(Date),
+      }),
+    );
+    expect(prisma.exam.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'exam-1' },
+        data: {
+          deletedAt: expect.any(Date),
+          status: ExamStatus.ARCHIVED,
+          publishedAt: null,
+        },
+      }),
     );
     expect(prisma.exam.delete).not.toHaveBeenCalled();
   });
 
-  it('deletes an Exam only when it has no related data', async () => {
-    prisma.exam.findUnique.mockResolvedValue({
+  it('rejects removing an already soft-deleted exam', async () => {
+    prisma.exam.findFirst.mockResolvedValue({
       id: 'exam-1',
-      _count: { questions: 0, examAssignments: 0, examAttempts: 0 },
+      deletedAt: new Date(),
     });
-    prisma.exam.delete.mockResolvedValue({ id: 'exam-1' });
 
-    await expect(service.remove('exam-1')).resolves.toEqual({ id: 'exam-1' });
-    expect(prisma.exam.delete).toHaveBeenCalledWith({ where: { id: 'exam-1' } });
+    await expect(service.remove('exam-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(prisma.exam.update).not.toHaveBeenCalled();
   });
 });

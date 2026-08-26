@@ -49,7 +49,7 @@ export class AssignmentsService {
                 select: { id: true },
             }),
             this.prisma.exam.findUnique({
-                where: { id: createAssignmentDto.examId },
+                where: { id: createAssignmentDto.examId, deletedAt: null },
                 select: { id: true },
             }),
         ]);
@@ -92,6 +92,7 @@ export class AssignmentsService {
         const assignments = await this.prisma.examAssignment.findMany({
             where: {
                 userId: userId ?? query.userId,
+                exam: { is: { deletedAt: null } },
             },
             include: assignmentInclude,
             orderBy: {
@@ -114,7 +115,10 @@ export class AssignmentsService {
 
     async findOne(id: string, userId?: string) {
         const assignment = await this.prisma.examAssignment.findUnique({
-            where: { id },
+            where: {
+                id,
+                exam: { is: { deletedAt: null } },
+            },
             include: assignmentInclude,
         });
 

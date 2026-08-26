@@ -40,7 +40,7 @@ export class QuestionsService {
 
     async create(examId: string, createQuestionDto: CreateQuestionDto) {
         const exam = await this.prismaService.exam.findUnique({
-            where: { id: examId },
+            where: { id: examId, deletedAt: null },
             select: { id: true },
         });
 
@@ -90,7 +90,7 @@ export class QuestionsService {
 
     async findByExam(examId: string, includeAnswers = false) {
         const exam = await this.prismaService.exam.findUnique({
-            where: { id: examId },
+            where: { id: examId, deletedAt: null },
             select: { id: true },
         });
 
@@ -102,6 +102,7 @@ export class QuestionsService {
             where: {
                 examId,
                 deletedAt: null,
+                exam: { is: { deletedAt: null } },
             },
             include: includeAnswers ? questionInclude : publicQuestionInclude,
             orderBy: {
@@ -115,6 +116,7 @@ export class QuestionsService {
             where: {
                 id,
                 deletedAt: null,
+                exam: { is: { deletedAt: null } },
             },
             include: includeAnswers ? questionInclude : publicQuestionInclude,
         });
@@ -296,9 +298,18 @@ export class QuestionsService {
     async updateOption(optionId: string, dto: UpdateQuestionOptionDto) {
         const option = await this.prismaService.questionOption.findUnique({
             where: { id: optionId },
+            select: {
+                id: true,
+                question: {
+                    select: {
+                        deletedAt: true,
+                        exam: { select: { deletedAt: true } },
+                    },
+                },
+            },
         });
 
-        if (!option) {
+        if (!option || option.question?.deletedAt || option.question?.exam?.deletedAt) {
             throw new NotFoundException('Option not found');
         }
 
@@ -311,9 +322,18 @@ export class QuestionsService {
     async deleteOption(optionId: string) {
         const option = await this.prismaService.questionOption.findUnique({
             where: { id: optionId },
+            select: {
+                id: true,
+                question: {
+                    select: {
+                        deletedAt: true,
+                        exam: { select: { deletedAt: true } },
+                    },
+                },
+            },
         });
 
-        if (!option) {
+        if (!option || option.question?.deletedAt || option.question?.exam?.deletedAt) {
             throw new NotFoundException('Option not found');
         }
 

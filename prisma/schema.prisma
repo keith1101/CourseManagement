@@ -116,6 +116,7 @@ model Exam {
   accessLevel     AccessLevel      @default(FREE)
   displayOrder    Int              @default(0)
   publishedAt     DateTime?
+  deletedAt       DateTime?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   questions       Question[]

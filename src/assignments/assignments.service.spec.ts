@@ -76,7 +76,9 @@ describe('AssignmentsService', () => {
 
     const result = await service.findAll({ status: AssignmentStatus.COMPLETED }, 'student-1');
     expect(prisma.examAssignment.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: 'student-1' } }),
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: 'student-1' }),
+      }),
     );
     expect(result).toHaveLength(1);
     expect(result[0].status).toBe(AssignmentStatus.COMPLETED);

@@ -369,6 +369,7 @@ async function main() {
           accessLevel: AccessLevel.FREE,
           displayOrder: 1,
           publishedAt: null,
+          deletedAt: null,
         },
         create: {
           id: IDS.draftExam,
@@ -379,6 +380,7 @@ async function main() {
           accessLevel: AccessLevel.FREE,
           displayOrder: 1,
           publishedAt: null,
+          deletedAt: null,
         },
       });
 
@@ -392,6 +394,7 @@ async function main() {
           accessLevel: AccessLevel.FREE,
           displayOrder: 2,
           publishedAt: PUBLISHED_AT,
+          deletedAt: null,
         },
         create: {
           id: IDS.freeExam,
@@ -402,6 +405,7 @@ async function main() {
           accessLevel: AccessLevel.FREE,
           displayOrder: 2,
           publishedAt: PUBLISHED_AT,
+          deletedAt: null,
         },
       });
 
@@ -415,6 +419,7 @@ async function main() {
           accessLevel: AccessLevel.PRO,
           displayOrder: 3,
           publishedAt: PUBLISHED_AT,
+          deletedAt: null,
         },
         create: {
           id: IDS.proExam,
@@ -425,6 +430,7 @@ async function main() {
           accessLevel: AccessLevel.PRO,
           displayOrder: 3,
           publishedAt: PUBLISHED_AT,
+          deletedAt: null,
         },
       });
 

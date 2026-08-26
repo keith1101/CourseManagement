@@ -64,7 +64,7 @@ export class ExamsService {
   }
 
   async findAll(query: ExamQueryDto, viewer: Viewer) {
-    const where: Prisma.ExamWhereInput = {};
+    const where: Prisma.ExamWhereInput = { deletedAt: null };
 
     if (viewer.role === UserRole.ADMIN) {
       if (query.status) {
@@ -89,7 +89,7 @@ export class ExamsService {
   }
 
   async findOne(id: string, viewer: Viewer) {
-    const where: Prisma.ExamWhereInput = { id };
+    const where: Prisma.ExamWhereInput = { id, deletedAt: null };
 
     if (viewer.role === UserRole.STUDENT) {
       const access = await this.getStudentAccess(viewer.userId);
@@ -181,52 +181,33 @@ export class ExamsService {
   }
 
   async remove(id: string) {
-    const exam = await this.prisma.exam.findUnique({
+    const exam = await this.prisma.exam.findFirst({
       where: { id },
-      select: {
-        id: true,
-        _count: {
-          select: {
-            questions: true,
-            examAssignments: true,
-            examAttempts: true,
-          },
-        },
-      },
+      select: { id: true, deletedAt: true },
     });
 
     if (!exam) {
       throw new NotFoundException('Exam not found');
     }
 
-    if (
-      exam._count.questions > 0 ||
-      exam._count.examAssignments > 0 ||
-      exam._count.examAttempts > 0
-    ) {
-      throw new ConflictException(
-        'Cannot delete exam with related questions, assignments, or attempts',
-      );
+    if (exam.deletedAt) {
+      throw new NotFoundException('Exam not found');
     }
 
-    try {
-      return await this.prisma.exam.delete({ where: { id } });
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === 'P2003'
-      ) {
-        throw new ConflictException(
-          'Cannot delete exam with related questions, assignments, or attempts',
-        );
-      }
-      throw error;
-    }
+    return this.prisma.exam.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        status: ExamStatus.ARCHIVED,
+        publishedAt: null,
+      },
+      include: examInclude,
+    });
   }
 
   private async getExamForAdmin(id: string) {
     const exam = await this.prisma.exam.findUnique({
-      where: { id },
+      where: { id, deletedAt: null },
       select: { id: true, subjectId: true, status: true },
     });
 
