@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateUsersDto } from './dto/update-users.dto';
 
@@ -59,15 +59,29 @@ export class UsersService {
         });
     }
 
-    async update(id: string, updateUsersDto: UpdateUsersDto) {
+    async update(id: string, updateUsersDto: UpdateUsersDto, actorId?: string) {
+        if (id === actorId && updateUsersDto.isActive === false) {
+            throw new ForbiddenException('Cannot lock your own account');
+        }
+
+        if (
+            id === actorId &&
+            (updateUsersDto.role !== undefined ||
+                updateUsersDto.accessLevel !== undefined ||
+                updateUsersDto.proExpiresAt !== undefined)
+        ) {
+            throw new ForbiddenException('Cannot change your own permissions');
+        }
+
         await this.find(id);
 
-        const { dateOfBirth, proExpiresAt, ...rest } = updateUsersDto;
+        const { dateOfBirth, proExpiresAt, isActive, ...rest } = updateUsersDto;
 
         return this.prismaService.user.update({
             where: { id },
             data: {
                 ...rest,
+                ...(isActive === undefined ? {} : { isActive }),
                 dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
                 proExpiresAt: proExpiresAt === undefined ? undefined : proExpiresAt ? new Date(proExpiresAt) : null,
             },
@@ -75,7 +89,11 @@ export class UsersService {
         });
     }
 
-    async lock(id: string) {
+    async lock(id: string, actorId?: string) {
+        if (id === actorId) {
+            throw new ForbiddenException('Cannot lock your own account');
+        }
+
         await this.find(id);
 
         return this.prismaService.user.update({
@@ -95,7 +113,11 @@ export class UsersService {
         });
     }
 
-    async updatePro(id: string) {
+    async updatePro(id: string, actorId?: string) {
+        if (id === actorId) {
+            throw new ForbiddenException('Cannot change your own permissions');
+        }
+
         await this.find(id);
 
         return this.prismaService.user.update({
@@ -105,7 +127,11 @@ export class UsersService {
         });
     }
 
-    async updateFree(id: string) {
+    async updateFree(id: string, actorId?: string) {
+        if (id === actorId) {
+            throw new ForbiddenException('Cannot change your own permissions');
+        }
+
         await this.find(id);
 
         return this.prismaService.user.update({

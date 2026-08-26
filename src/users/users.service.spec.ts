@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
 
@@ -77,6 +77,40 @@ describe('UsersService', () => {
         data: { isActive: value },
       }),
     );
+  });
+
+  it('rejects an admin from locking their own account', async () => {
+    await expect(service.lock(safeUser.id, safeUser.id)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects self-lock through the generic user update endpoint', async () => {
+    await expect(
+      service.update(safeUser.id, { isActive: false } as any, safeUser.id),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ role: 'STUDENT' }],
+    [{ accessLevel: 'PRO' }],
+    [{ proExpiresAt: null }],
+  ])('rejects an admin from changing their own permissions: %o', async (payload) => {
+    await expect(
+      service.update(safeUser.id, payload as any, safeUser.id),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['updatePro', 'updateFree'])('%s rejects changing own permissions', async (operation) => {
+    await expect((service as any)[operation](safeUser.id, safeUser.id)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 
   it('updates profile fields and maps date strings to Date values', async () => {
