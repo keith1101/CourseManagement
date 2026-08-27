@@ -7,6 +7,11 @@ import {
   IsString,
   IsUUID,
   IsUrl,
+  registerDecorator,
+  ValidationArguments,
+  ValidationOptions,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
   Min,
   ValidateIf,
 } from 'class-validator';
@@ -14,6 +19,38 @@ import { AccessLevel, MaterialType } from '../../../generated/client/enums';
 
 const documentMaterial = (value: unknown) =>
   value === MaterialType.PDF || value === MaterialType.DOCX;
+
+@ValidatorConstraint({ name: 'isHttpOrS3Url', async: false })
+class IsHttpOrS3UrlConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown) {
+    if (typeof value !== 'string') return false;
+
+    try {
+      const url = new URL(value);
+      const isSupportedProtocol = ['http:', 'https:', 's3:'].includes(
+        url.protocol,
+      );
+      return isSupportedProtocol && Boolean(url.hostname) && url.pathname !== '/';
+    } catch {
+      return false;
+    }
+  }
+
+  defaultMessage(args: ValidationArguments) {
+    return `${args.property} must be an http(s) or s3 URL`;
+  }
+}
+
+function IsHttpOrS3Url(options?: ValidationOptions): PropertyDecorator {
+  return (target, propertyKey) => {
+    registerDecorator({
+      target: target.constructor,
+      propertyName: propertyKey.toString(),
+      options,
+      validator: IsHttpOrS3UrlConstraint,
+    });
+  };
+}
 
 export class CreateMaterialDto {
   @IsUUID()
@@ -32,7 +69,7 @@ export class CreateMaterialDto {
   @ValidateIf((object) => documentMaterial(object.materialType))
   @IsString()
   @IsNotEmpty()
-  @IsUrl({ require_protocol: true })
+  @IsHttpOrS3Url()
   storageUrl?: string;
 
   @ValidateIf((object) => object.materialType === MaterialType.EMBEDDED_VIDEO)

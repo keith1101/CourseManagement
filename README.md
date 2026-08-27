@@ -156,7 +156,7 @@ Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
 Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
 active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
 
-### Upload file lên Google Cloud Storage
+### Upload file lên Neon Object Storage
 
 Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với
 `multipart/form-data`:
@@ -168,21 +168,33 @@ Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với
 | `title` | Có | Tên tài liệu |
 | `accessLevel` | Có | `FREE` hoặc `PRO` |
 
-File được lưu private trong bucket qua `GCS_BUCKET_NAME`; database chỉ lưu
-`gs://...` và metadata file. Dùng `GET /api/materials/:id/download` để nhận
-Signed URL có thời hạn 15 phút. Video nhúng vẫn dùng `embedUrl` như cũ.
+File được lưu private trong bucket Neon S3-compatible qua `NEON_S3_BUCKET_NAME`;
+database chỉ lưu `s3://...` và metadata file. Dùng
+`GET /api/materials/:id/download` để nhận Signed URL có thời hạn 15 phút.
+Video nhúng vẫn dùng `embedUrl` như cũ.
 
 Cấu hình backend qua `.env`:
 
 ```env
-GCP_PROJECT_ID=course-management-2026
-GCS_BUCKET_NAME=course-media-bucket
-GOOGLE_APPLICATION_CREDENTIALS=C:/secure/course-media-uploader.json
+NEON_S3_BUCKET_NAME=course-media-bucket
+AWS_ACCESS_KEY_ID=<pulled-by-neon-env>
+AWS_SECRET_ACCESS_KEY=<pulled-by-neon-env>
+AWS_ENDPOINT_URL_S3=https://<branch-endpoint>.storage.c-1.us-east-2.aws.neon.tech
+AWS_REGION=us-east-2
 ```
 
-Local development có thể dùng ADC hoặc Service Account key đặt ngoài repository.
-Khi chạy trên Google Cloud, nên attach Service Account vào Cloud Run/Compute
-thay vì lưu key trong ứng dụng.
+Chạy `neon env pull` sau khi đổi branch để nhận credential S3 tương ứng với
+branch đó. Bucket private chỉ được đọc qua presigned URL từ backend.
+
+Để chạy một lần việc copy dữ liệu cũ từ GCS sang Neon, giữ các biến GCS và
+credential service account trong shell cục bộ rồi chạy:
+
+```bash
+pnpm storage:migrate:gcs
+```
+
+Script copy và kiểm tra kích thước object, cập nhật các `Material.storageUrl`
+từ `gs://...` sang `s3://...`, và không xóa object nguồn GCS.
 
 ## 5. Exams Module
 

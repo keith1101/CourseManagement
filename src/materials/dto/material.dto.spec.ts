@@ -54,4 +54,18 @@ describe('CreateMaterialDto', () => {
     expect(validErrors).toHaveLength(0);
     expect(invalidErrors.length).toBeGreaterThan(0);
   });
+
+  it('accepts a Neon S3 URI for document storage', async () => {
+    const errors = await validate(
+      plainToInstance(CreateMaterialDto, {
+        subjectId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        title: 'PDF',
+        materialType: MaterialType.PDF,
+        storageUrl: 's3://course-media-bucket/materials/file.pdf',
+        accessLevel: AccessLevel.FREE,
+      }),
+    );
+
+    expect(errors).toHaveLength(0);
+  });
 });

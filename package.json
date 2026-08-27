@@ -16,13 +16,15 @@
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
     "db:validate": "prisma validate",
+    "storage:migrate:gcs": "node scripts/migrate-gcs-to-neon.cjs",
     "test": "jest --runInBand",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "prebuild": "pnpm db:generate"
   },
   "dependencies": {
-    "@google-cloud/storage": "^8.0.1",
+    "@aws-sdk/client-s3": "^3.1118.0",
+    "@aws-sdk/s3-request-presigner": "^3.1118.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.0",
@@ -43,6 +45,8 @@
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
+    "@google-cloud/storage": "^8.0.1",
+    "@neon/config": "^1.0.4",
     "@nestjs/cli": "^11.0.0",
     "@nestjs/testing": "^11.2.1",
     "@types/bcrypt": "^6.0.0",

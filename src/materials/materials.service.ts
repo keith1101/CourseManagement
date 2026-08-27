@@ -13,9 +13,9 @@ import { MaterialQueryDto } from './dto/material-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { UploadMaterialDto } from './dto/upload-material.dto';
 import {
-  GcsStorageService,
+  S3StorageService,
   StorageUploadFile,
-} from '../storage/gcs-storage.service';
+} from '../storage/s3-storage.service';
 import { randomUUID } from 'node:crypto';
 
 const materialInclude = {
@@ -49,7 +49,7 @@ type MaterialShape = {
 export class MaterialsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gcsStorage: GcsStorageService,
+    private readonly s3Storage: S3StorageService,
   ) {}
 
   async create(createMaterialDto: CreateMaterialDto) {
@@ -99,7 +99,7 @@ export class MaterialsService {
     const materialType = this.detectUploadedMaterialType(file);
     const safeFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
     const objectName = `materials/${uploadMaterialDto.subjectId}/${randomUUID()}-${safeFileName || 'file'}`;
-    const uploaded = await this.gcsStorage.upload(file, objectName);
+    const uploaded = await this.s3Storage.upload(file, objectName);
 
     try {
       return await this.prisma.material.create({
@@ -107,7 +107,7 @@ export class MaterialsService {
           subjectId: uploadMaterialDto.subjectId,
           title,
           materialType,
-          storageUrl: uploaded.gsUri,
+          storageUrl: uploaded.s3Uri,
           embedUrl: null,
           originalFileName: file.originalname,
           mimeType: file.mimetype,
@@ -119,7 +119,7 @@ export class MaterialsService {
         include: materialInclude,
       });
     } catch (error) {
-      await this.gcsStorage.delete(uploaded.gsUri).catch(() => undefined);
+      await this.s3Storage.delete(uploaded.s3Uri).catch(() => undefined);
       this.handlePrismaError(error);
     }
   }
@@ -176,7 +176,7 @@ export class MaterialsService {
     }
 
     const expiresInSeconds = 15 * 60;
-    const url = await this.gcsStorage.getSignedReadUrl(
+    const url = await this.s3Storage.getSignedReadUrl(
       material.storageUrl,
       expiresInSeconds,
     );
@@ -301,8 +301,8 @@ export class MaterialsService {
     });
     if (!existing) throw new NotFoundException('Material not found');
 
-    if (existing.storageUrl?.startsWith('gs://')) {
-      await this.gcsStorage.delete(existing.storageUrl);
+    if (existing.storageUrl?.startsWith('s3://')) {
+      await this.s3Storage.delete(existing.storageUrl);
     }
 
     try {
@@ -423,7 +423,7 @@ export class MaterialsService {
   }
 
   private isStorageUrl(value: string | null | undefined) {
-    return this.isHttpUrl(value) || /^gs:\/\/[^/]+\/.+/.test(value ?? '');
+    return this.isHttpUrl(value) || /^s3:\/\/[^/]+\/.+/.test(value ?? '');
   }
 
   private detectUploadedMaterialType(file: StorageUploadFile) {

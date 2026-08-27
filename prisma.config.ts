@@ -9,6 +9,8 @@ export default defineConfig({
     seed: 'ts-node --project tsconfig.json prisma/seed.ts',
   },
   datasource: {
-    url: env('DATABASE_URL'),
+    // Runtime traffic uses Neon’s pooled DATABASE_URL. Prisma migrations need
+    // the direct URL so PgBouncer cannot interfere with session operations.
+    url: process.env.DATABASE_URL_UNPOOLED ?? env('DATABASE_URL'),
   },
 });
