@@ -96,7 +96,7 @@ describe('MaterialsService', () => {
       subjectId: 'subject-1',
       title: 'Video',
       materialType: MaterialType.EMBEDDED_VIDEO,
-      embedUrl: 'https://example.com/embed/video',
+      embedUrl: 'https://youtu.be/dQw4w9WgXcQ?si=shared-link',
       storageUrl: 'https://example.com/ignored.pdf',
       originalFileName: 'ignored.pdf',
       mimeType: 'application/pdf',
@@ -110,7 +110,7 @@ describe('MaterialsService', () => {
         originalFileName: null,
         mimeType: null,
         fileSizeBytes: null,
-        embedUrl: 'https://example.com/embed/video',
+        embedUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
         isPublished: false,
       }),
     );

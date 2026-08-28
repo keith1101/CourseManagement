@@ -11,6 +11,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { AccessLevel, MaterialType } from '../../../generated/client/enums';
+import { normalizeYoutubeEmbedUrl } from '../youtube-url';
 
 const documentMaterial = (value: unknown) =>
   value === MaterialType.PDF || value === MaterialType.DOCX;
@@ -36,6 +37,9 @@ export class CreateMaterialDto {
   storageUrl?: string;
 
   @ValidateIf((object) => object.materialType === MaterialType.EMBEDDED_VIDEO)
+  @Transform(({ value }) =>
+    typeof value === 'string' ? normalizeYoutubeEmbedUrl(value) : value,
+  )
   @IsString()
   @IsNotEmpty()
   @IsUrl({ require_protocol: true })

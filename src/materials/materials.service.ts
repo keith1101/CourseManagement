@@ -17,6 +17,7 @@ import {
   StorageUploadFile,
 } from '../storage/gcs-storage.service';
 import { randomUUID } from 'node:crypto';
+import { normalizeYoutubeEmbedUrl } from './youtube-url';
 
 const materialInclude = {
   subject: {
@@ -363,6 +364,7 @@ export class MaterialsService {
     if (shape.materialType === MaterialType.EMBEDDED_VIDEO) {
       return {
         ...shape,
+        embedUrl: normalizeYoutubeEmbedUrl(shape.embedUrl),
         storageUrl: null,
         originalFileName: null,
         mimeType: null,

@@ -156,6 +156,11 @@ Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
 Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
 active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
 
+Với `EMBEDDED_VIDEO`, backend tự chuẩn hóa các URL YouTube dạng watch, youtu.be,
+shorts, live, embed, v/e, mobile, music và các link redirect/attribution về
+`https://www.youtube.com/embed/{videoId}` trước khi validate và lưu. URL của
+nguồn video khác YouTube được giữ nguyên.
+
 ### Upload file lên Google Cloud Storage
 
 Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với

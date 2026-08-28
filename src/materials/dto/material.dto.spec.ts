@@ -54,4 +54,17 @@ describe('CreateMaterialDto', () => {
     expect(validErrors).toHaveLength(0);
     expect(invalidErrors.length).toBeGreaterThan(0);
   });
+
+  it('normalizes a YouTube watch URL before URL validation', async () => {
+    const dto = plainToInstance(CreateMaterialDto, {
+      subjectId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      title: 'Video',
+      materialType: MaterialType.EMBEDDED_VIDEO,
+      embedUrl: 'www.youtube.com/watch?feature=shared&v=dQw4w9WgXcQ',
+      accessLevel: AccessLevel.FREE,
+    });
+
+    expect(dto.embedUrl).toBe('https://www.youtube.com/embed/dQw4w9WgXcQ');
+    await expect(validate(dto)).resolves.toHaveLength(0);
+  });
 });
