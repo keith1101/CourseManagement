@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+coverage/
+
+# Environment variables
+.env
+.env.*
+.env.local
+.env.*.local
+!.env.example
+
+# Prisma generated client
+/generated/
+generated/
+
+# Local binaries
+cloud-sql-proxy
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS
+.DS_Store
+
+# IDE / Editor
+.vscode/
+.idea/
+cloud-sql-proxy.x64.exe
+Supplement.jpg
+walkthrough.md
+course-media-uploader.json
