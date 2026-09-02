@@ -3,6 +3,7 @@ import {
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
+import { QuestionType } from '../../generated/client/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
@@ -34,6 +35,11 @@ const publicQuestionInclude = {
     },
 } as const;
 
+type AnswerKeyOption = {
+    id?: string;
+    isCorrect?: boolean | null;
+};
+
 @Injectable()
 export class QuestionsService {
     constructor(private readonly prismaService: PrismaService) {}
@@ -56,6 +62,12 @@ export class QuestionsService {
         if (!subject || !subject.isActive) {
             throw new NotFoundException('Subject not found');
         }
+
+        this.validateAnswerKey(
+            createQuestionDto.questionType,
+            createQuestionDto.correctTextAnswer,
+            createQuestionDto.options ?? [],
+        );
 
         return this.prismaService.$transaction(async (transaction) => {
             const position = await transaction.question.count({
@@ -144,6 +156,19 @@ export class QuestionsService {
         if (updateQuestionsDto.subjectId !== undefined) {
             await this.ensureActiveSubject(updateQuestionsDto.subjectId);
         }
+
+        const questionType =
+            updateQuestionsDto.questionType ?? existing.questionType;
+        const correctTextAnswer =
+            updateQuestionsDto.correctTextAnswer !== undefined
+                ? updateQuestionsDto.correctTextAnswer
+                : existing.correctTextAnswer;
+        const options =
+            updateQuestionsDto.options !== undefined
+                ? updateQuestionsDto.options
+                : existing.questionOptions;
+
+        this.validateAnswerKey(questionType, correctTextAnswer, options);
 
         return this.prismaService.$transaction(async (transaction) => {
             const { options, ...questionData } = updateQuestionsDto;
@@ -295,7 +320,16 @@ export class QuestionsService {
 
     // QuestionOption sub-resource methods
     async createOption(questionId: string, dto: CreateQuestionOptionDto) {
-        await this.find(questionId, true);
+        const question = await this.find(questionId, true);
+
+        this.validateAnswerKey(
+            question.questionType,
+            question.correctTextAnswer,
+            [
+                ...question.questionOptions,
+                { isCorrect: dto.isCorrect ?? false },
+            ],
+        );
 
         const position = dto.position ?? (await this.prismaService.questionOption.count({
             where: { questionId },
@@ -316,10 +350,19 @@ export class QuestionsService {
             where: { id: optionId },
             select: {
                 id: true,
+                isCorrect: true,
                 question: {
                     select: {
+                        questionType: true,
+                        correctTextAnswer: true,
                         deletedAt: true,
                         exam: { select: { deletedAt: true } },
+                        questionOptions: {
+                            select: {
+                                id: true,
+                                isCorrect: true,
+                            },
+                        },
                     },
                 },
             },
@@ -328,6 +371,18 @@ export class QuestionsService {
         if (!option || option.question?.deletedAt || option.question?.exam?.deletedAt) {
             throw new NotFoundException('Option not found');
         }
+
+        this.validateAnswerKey(
+            option.question.questionType,
+            option.question.correctTextAnswer,
+            option.question.questionOptions.map((currentOption) => ({
+                id: currentOption.id,
+                isCorrect:
+                    currentOption.id === option.id
+                        ? (dto.isCorrect ?? option.isCorrect)
+                        : currentOption.isCorrect,
+            })),
+        );
 
         return this.prismaService.questionOption.update({
             where: { id: optionId },
@@ -340,10 +395,19 @@ export class QuestionsService {
             where: { id: optionId },
             select: {
                 id: true,
+                isCorrect: true,
                 question: {
                     select: {
+                        questionType: true,
+                        correctTextAnswer: true,
                         deletedAt: true,
                         exam: { select: { deletedAt: true } },
+                        questionOptions: {
+                            select: {
+                                id: true,
+                                isCorrect: true,
+                            },
+                        },
                     },
                 },
             },
@@ -352,6 +416,14 @@ export class QuestionsService {
         if (!option || option.question?.deletedAt || option.question?.exam?.deletedAt) {
             throw new NotFoundException('Option not found');
         }
+
+        this.validateAnswerKey(
+            option.question.questionType,
+            option.question.correctTextAnswer,
+            option.question.questionOptions.filter(
+                (currentOption) => currentOption.id !== option.id,
+            ),
+        );
 
         return this.prismaService.questionOption.delete({
             where: { id: optionId },
@@ -366,6 +438,47 @@ export class QuestionsService {
 
         if (!subject || !subject.isActive) {
             throw new NotFoundException('Subject not found');
+        }
+    }
+
+    private validateAnswerKey(
+        questionType: QuestionType,
+        correctTextAnswer: string | null | undefined,
+        options: ReadonlyArray<AnswerKeyOption>,
+    ) {
+        if (questionType === QuestionType.MULTIPLE_CHOICE) {
+            if (correctTextAnswer?.trim()) {
+                throw new BadRequestException(
+                    'Multiple-choice questions must use options instead of correctTextAnswer',
+                );
+            }
+
+            if (options.length === 0) {
+                throw new BadRequestException(
+                    'Multiple-choice questions require at least one option',
+                );
+            }
+
+            const correctOptionCount = options.filter(
+                (option) => option.isCorrect === true,
+            ).length;
+
+            if (correctOptionCount !== 1) {
+                throw new BadRequestException(
+                    'Multiple-choice questions require exactly one correct option',
+                );
+            }
+
+            return;
+        }
+
+        if (
+            questionType === QuestionType.SHORT_ANSWER &&
+            options.length > 0
+        ) {
+            throw new BadRequestException(
+                'Short-answer questions cannot contain options',
+            );
         }
     }
 }

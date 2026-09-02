@@ -134,6 +134,7 @@ model Question {
   instruction             String?
   explaination            String?
   timeLimitSeconds        Int
+  // Used for SHORT_ANSWER; MULTIPLE_CHOICE uses QuestionOption.isCorrect.
   correctTextAnswer       String?
   position                Int
   createdAt               DateTime                 @default(now())

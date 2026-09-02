@@ -96,16 +96,146 @@ describe('QuestionsService', () => {
     });
   });
 
+  it('rejects a multiple-choice question without exactly one correct option', async () => {
+    prisma.exam.findUnique.mockResolvedValue({ id: 'exam-1' });
+    prisma.subject.findUnique.mockResolvedValue({ id: 'subject-1', isActive: true });
+
+    await expect(
+      service.create('exam-1', {
+        questionType: QuestionType.MULTIPLE_CHOICE,
+        subjectId: 'subject-1',
+        contentText: 'Question',
+        timeLimitSeconds: 30,
+        options: [
+          { contentText: 'A', isCorrect: false },
+          { contentText: 'B', isCorrect: false },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a multiple-choice question with a text answer key', async () => {
+    prisma.exam.findUnique.mockResolvedValue({ id: 'exam-1' });
+    prisma.subject.findUnique.mockResolvedValue({ id: 'subject-1', isActive: true });
+
+    await expect(
+      service.create('exam-1', {
+        questionType: QuestionType.MULTIPLE_CHOICE,
+        subjectId: 'subject-1',
+        contentText: 'Question',
+        timeLimitSeconds: 30,
+        correctTextAnswer: 'A',
+        options: [
+          { contentText: 'A', isCorrect: true },
+          { contentText: 'B', isCorrect: false },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects replacing a multiple-choice option set with multiple correct options', async () => {
+    prisma.question.findFirst.mockResolvedValue({
+      id: 'question-1',
+      questionType: QuestionType.MULTIPLE_CHOICE,
+      correctTextAnswer: null,
+      questionOptions: [
+        { id: 'option-1', contentText: 'A', isCorrect: true },
+        { id: 'option-2', contentText: 'B', isCorrect: false },
+      ],
+    });
+
+    await expect(
+      service.update('question-1', {
+        options: [
+          { contentText: 'A', isCorrect: true },
+          { contentText: 'B', isCorrect: true },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects adding an option without a correct answer to a multiple-choice question', async () => {
+    prisma.question.findFirst.mockResolvedValue({
+      id: 'question-1',
+      questionType: QuestionType.MULTIPLE_CHOICE,
+      correctTextAnswer: null,
+      questionOptions: [],
+    });
+
+    await expect(
+      service.createOption('question-1', { contentText: 'A' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.questionOption.count).not.toHaveBeenCalled();
+  });
+
+  it('rejects changing a multiple-choice option to create a second correct answer', async () => {
+    prisma.questionOption.findUnique.mockResolvedValue({
+      id: 'option-2',
+      isCorrect: false,
+      question: {
+        questionType: QuestionType.MULTIPLE_CHOICE,
+        correctTextAnswer: null,
+        deletedAt: null,
+        exam: { deletedAt: null },
+        questionOptions: [
+          { id: 'option-1', isCorrect: true },
+          { id: 'option-2', isCorrect: false },
+        ],
+      },
+    });
+
+    await expect(
+      service.updateOption('option-2', { isCorrect: true }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.questionOption.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting the only correct option from a multiple-choice question', async () => {
+    prisma.questionOption.findUnique.mockResolvedValue({
+      id: 'option-1',
+      isCorrect: true,
+      question: {
+        questionType: QuestionType.MULTIPLE_CHOICE,
+        correctTextAnswer: null,
+        deletedAt: null,
+        exam: { deletedAt: null },
+        questionOptions: [
+          { id: 'option-1', isCorrect: true },
+          { id: 'option-2', isCorrect: false },
+        ],
+      },
+    });
+
+    await expect(service.deleteOption('option-1')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.questionOption.delete).not.toHaveBeenCalled();
+  });
+
   it('updates question options by replacing the option set', async () => {
-    prisma.question.findFirst.mockResolvedValue({ id: 'question-1' });
+    prisma.question.findFirst.mockResolvedValue({
+      id: 'question-1',
+      questionType: QuestionType.MULTIPLE_CHOICE,
+      correctTextAnswer: null,
+      questionOptions: [
+        { id: 'option-1', contentText: 'A', isCorrect: true },
+        { id: 'option-2', contentText: 'B', isCorrect: false },
+      ],
+    });
     transaction.question.update.mockResolvedValue({ id: 'question-1' });
     transaction.questionOption.deleteMany.mockResolvedValue({ count: 2 });
-    transaction.questionOption.createMany.mockResolvedValue({ count: 1 });
+    transaction.questionOption.createMany.mockResolvedValue({ count: 2 });
     transaction.question.findUnique.mockResolvedValue({ id: 'question-1' });
 
     await service.update('question-1', {
       contentText: 'Updated',
-      options: [{ contentText: 'Only option', isCorrect: true }],
+      options: [
+        { contentText: 'A', isCorrect: true },
+        { contentText: 'B', isCorrect: false },
+      ],
     });
 
     expect(transaction.questionOption.deleteMany).toHaveBeenCalledWith({
