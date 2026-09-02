@@ -21,6 +21,7 @@ describe('AuthService', () => {
     id: 'user-1',
     email: 'student@example.com',
     passwordHash: 'hashed-password',
+    tokenVersion: 0,
     fullName: 'Nguyen Van A',
     phone: '0901234567',
     dateOfBirth,
@@ -206,6 +207,7 @@ describe('AuthService', () => {
         sub: persistedUser.id,
         email: persistedUser.email,
         role: persistedUser.role,
+        tokenVersion: persistedUser.tokenVersion,
       });
       expect(result).toEqual({ accessToken: 'access-token', user: safeUser });
       expect(result.user).not.toHaveProperty('passwordHash');

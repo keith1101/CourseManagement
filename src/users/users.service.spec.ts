@@ -2,6 +2,12 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
 
+jest.mock('bcrypt', () => ({
+  hash: jest.fn(),
+}));
+
+import * as bcrypt from 'bcrypt';
+
 describe('UsersService', () => {
   const date = new Date('2026-08-25T00:00:00.000Z');
   const safeUser = {
@@ -23,6 +29,7 @@ describe('UsersService', () => {
   let prisma: any;
 
   beforeEach(() => {
+    jest.clearAllMocks();
     prisma = {
       user: {
         findMany: jest.fn(),
@@ -131,5 +138,47 @@ describe('UsersService', () => {
         },
       }),
     );
+  });
+
+  describe('resetPassword', () => {
+    const hashMock = bcrypt.hash as jest.Mock;
+
+    it('hashes the new password and increments the token version for a student', async () => {
+      prisma.user.findUnique.mockResolvedValue({ role: 'STUDENT' });
+      hashMock.mockResolvedValue('new-password-hash');
+
+      await expect(
+        service.resetPassword('student-1', { newPassword: 'password123' }),
+      ).resolves.toEqual({ message: 'Password reset successfully' });
+
+      expect(hashMock).toHaveBeenCalledWith('password123', 10);
+      expect(prisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'student-1' },
+        data: {
+          passwordHash: 'new-password-hash',
+          tokenVersion: { increment: 1 },
+        },
+      });
+    });
+
+    it('rejects resetting an admin account', async () => {
+      prisma.user.findUnique.mockResolvedValue({ role: 'ADMIN' });
+
+      await expect(
+        service.resetPassword('admin-1', { newPassword: 'password123' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(hashMock).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('throws 404 when the reset target does not exist', async () => {
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      await expect(
+        service.resetPassword('missing', { newPassword: 'password123' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(hashMock).not.toHaveBeenCalled();
+      expect(prisma.user.update).not.toHaveBeenCalled();
+    });
   });
 });

@@ -14,6 +14,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { UserRole } from '../../generated/client/client';
 import { UsersService } from './users.service';
 import { UpdateUsersDto } from './dto/update-users.dto';
+import { ResetUserPasswordDto } from './dto/reset-user-password.dto';
 
 type AuthenticatedRequest = {
     user: {
@@ -73,5 +74,13 @@ export class UsersController {
         @Request() request: AuthenticatedRequest,
     ) {
         return this.usersService.updateFree(id, request.user.sub);
+    }
+
+    @Patch(':id/reset-password')
+    resetPassword(
+        @Param('id') id: string,
+        @Body() resetPasswordDto: ResetUserPasswordDto,
+    ) {
+        return this.usersService.resetPassword(id, resetPasswordDto);
     }
 }

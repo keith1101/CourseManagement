@@ -1,5 +1,8 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
+import { UserRole } from '../../generated/client/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ResetUserPasswordDto } from './dto/reset-user-password.dto';
 import { UpdateUsersDto } from './dto/update-users.dto';
 
 const safeUserSelect = {
@@ -139,5 +142,32 @@ export class UsersService {
             data: { accessLevel: 'FREE', proExpiresAt: null },
             select: safeUserSelect,
         });
+    }
+
+    async resetPassword(id: string, resetPasswordDto: ResetUserPasswordDto) {
+        const user = await this.prismaService.user.findUnique({
+            where: { id },
+            select: { role: true },
+        });
+
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+
+        if (user.role !== UserRole.STUDENT) {
+            throw new ForbiddenException('Only student accounts can be reset');
+        }
+
+        const passwordHash = await bcrypt.hash(resetPasswordDto.newPassword, 10);
+
+        await this.prismaService.user.update({
+            where: { id },
+            data: {
+                passwordHash,
+                tokenVersion: { increment: 1 },
+            },
+        });
+
+        return { message: 'Password reset successfully' };
     }
 }
