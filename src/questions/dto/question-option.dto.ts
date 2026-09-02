@@ -10,6 +10,10 @@ export class QuestionOptionDto {
     contentText!: string;
 
     @IsOptional()
+    @IsString()
+    imageUrl?: string;
+
+    @IsOptional()
     @IsBoolean()
     isCorrect?: boolean;
 
@@ -25,6 +29,10 @@ export class CreateQuestionOptionDto {
     contentText!: string;
 
     @IsOptional()
+    @IsString()
+    imageUrl?: string;
+
+    @IsOptional()
     @IsBoolean()
     isCorrect?: boolean;
 
@@ -38,6 +46,10 @@ export class UpdateQuestionOptionDto {
     @IsOptional()
     @IsString()
     contentText?: string;
+
+    @IsOptional()
+    @IsString()
+    imageUrl?: string;
 
     @IsOptional()
     @IsBoolean()

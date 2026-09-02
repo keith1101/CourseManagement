@@ -11,6 +11,7 @@ import {
     QuestionType,
 } from '../../generated/client/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import { GcsStorageService } from '../storage/gcs-storage.service';
 import { AttemptQueryDto } from './dto/attempt-query.dto';
 import { SaveAttemptAnswerDto } from './dto/save-attempt-answer.dto';
 import { StartAttemptDto } from './dto/start-attempt.dto';
@@ -21,14 +22,18 @@ const safeQuestionSelect = {
     questionType: true,
     contentText: true,
     imageUrl: true,
+    hintImageUrl: true,
+    hint: true,
     instruction: true,
     explaination: true,
+    explanationImageUrl: true,
     timeLimitSeconds: true,
     position: true,
     questionOptions: {
         select: {
             id: true,
             contentText: true,
+            imageUrl: true,
             position: true,
         },
         orderBy: {
@@ -90,6 +95,7 @@ const attemptDetailSelect = {
                 select: {
                     id: true,
                     contentText: true,
+                    imageUrl: true,
                     position: true,
                 },
             },
@@ -102,7 +108,10 @@ const attemptDetailSelect = {
 
 @Injectable()
 export class AttemptsService {
-    constructor(private readonly prisma: PrismaService) {}
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly gcsStorage: GcsStorageService,
+    ) {}
 
     async start(
         examId: string,
@@ -287,10 +296,12 @@ export class AttemptsService {
 
     async findOne(id: string, userId?: string) {
         const attempt = await this.getAttempt(id, userId);
-        return this.prisma.examAttempt.findUnique({
+        const result = await this.prisma.examAttempt.findUnique({
             where: { id: attempt.id },
             select: attemptDetailSelect,
         });
+
+        return result ? this.withAttemptMedia(result) : result;
     }
 
     async saveAnswer(
@@ -316,6 +327,7 @@ export class AttemptsService {
                 questionType: true,
                 correctTextAnswer: true,
                 explaination: true,
+                explanationImageUrl: true,
                 questionOptions: {
                     select: {
                         id: true,
@@ -339,12 +351,20 @@ export class AttemptsService {
             throw new NotFoundException('Question not found for this exam');
         }
 
-        const selectedOptionId = saveAttemptAnswerDto.selectedOptionId;
+        // Treat an empty form value as no selection. Persisting `''` would
+        // violate the nullable foreign key on AttemptAnswer.selectedOptionId.
+        const selectedOptionId = saveAttemptAnswerDto.selectedOptionId?.trim() || undefined;
         const selectedOption = selectedOptionId
             ? question.questionOptions.find(
                   (option) => option.id === selectedOptionId,
               )
             : undefined;
+
+        if (selectedOptionId && !selectedOption) {
+            throw new BadRequestException(
+                'selectedOptionId must belong to a question option in this exam',
+            );
+        }
 
         if (question.questionType === QuestionType.MULTIPLE_CHOICE && !saveAttemptAnswerDto.timedOut) {
             if (!selectedOptionId || !selectedOption) {
@@ -367,15 +387,20 @@ export class AttemptsService {
             saveAttemptAnswerDto.rawValue ?? selectedOption?.contentText ?? '';
         const normalizedText =
             saveAttemptAnswerDto.normalizedText ?? this.normalize(rawValue);
-        const isCorrect = saveAttemptAnswerDto.timedOut
-            ? false
-            : this.isAnswerCorrect(question, {
-                  selectedOptionId: selectedOptionId ?? null,
-                  answerType,
-                  rawValue,
-                  normalizedText,
-                  numericValue: saveAttemptAnswerDto.numericValue ?? null,
-              });
+        const shouldEvaluate =
+            saveAttemptAnswerDto.finalize === true ||
+            saveAttemptAnswerDto.timedOut === true;
+        const isCorrect = shouldEvaluate
+            ? saveAttemptAnswerDto.timedOut
+                ? false
+                : this.isAnswerCorrect(question, {
+                      selectedOptionId: selectedOptionId ?? null,
+                      answerType,
+                      rawValue,
+                      normalizedText,
+                      numericValue: saveAttemptAnswerDto.numericValue ?? null,
+                  })
+            : false;
 
         const existingAnswer = await this.prisma.attemptAnswer.findFirst({
             where: {
@@ -409,6 +434,10 @@ export class AttemptsService {
                   },
               });
 
+        const explanationImage = shouldEvaluate && question.explanationImageUrl
+            ? (await this.gcsStorage.resolveReadUrl(question.explanationImageUrl)).url
+            : undefined;
+
         return {
             id: answer.id,
             attemptId: answer.attemptId,
@@ -420,11 +449,24 @@ export class AttemptsService {
             content: answer.content,
             position: answer.position,
             numericValue: answer.numericValue,
-            isCorrect: answer.isCorrect,
+            // A draft save must not expose grading state or answer keys. The
+            // final submit endpoint evaluates every persisted answer again.
+            isCorrect: shouldEvaluate ? answer.isCorrect : undefined,
             timedOut: !!saveAttemptAnswerDto.timedOut,
-            correctOptionId: question.questionOptions.find((option) => option.isCorrect)?.id,
-            correctTextAnswer: question.correctTextAnswer ?? question.questionAcceptedAnswers.find((accepted) => accepted.isPrimary)?.rawValue,
-            explanation: question.explaination,
+            ...(shouldEvaluate
+                ? {
+                      correctOptionId: question.questionOptions.find(
+                          (option) => option.isCorrect,
+                      )?.id,
+                      correctTextAnswer:
+                          question.correctTextAnswer ??
+                          question.questionAcceptedAnswers.find(
+                              (accepted) => accepted.isPrimary,
+                          )?.rawValue,
+                      explanation: question.explaination,
+                      explanationImage,
+                  }
+                : {}),
         };
     }
 
@@ -561,13 +603,18 @@ export class AttemptsService {
                                 id: true,
                                 questionType: true,
                                 contentText: true,
+                                imageUrl: true,
+                                hintImageUrl: true,
+                                hint: true,
                                 explaination: true,
+                                explanationImageUrl: true,
                                 instruction: true,
                                 correctTextAnswer: true,
                                 questionOptions: {
                                     select: {
                                         id: true,
                                         contentText: true,
+                                        imageUrl: true,
                                         isCorrect: true,
                                         position: true,
                                     },
@@ -589,6 +636,7 @@ export class AttemptsService {
                             select: {
                                 id: true,
                                 contentText: true,
+                                imageUrl: true,
                                 position: true,
                             },
                         },
@@ -612,13 +660,22 @@ export class AttemptsService {
                 questionType: true,
                 contentText: true,
                 imageUrl: true,
+                hintImageUrl: true,
+                hint: true,
                 instruction: true,
                 explaination: true,
+                explanationImageUrl: true,
                 timeLimitSeconds: true,
                 correctTextAnswer: true,
                 position: true,
                 questionOptions: {
-                    select: { id: true, contentText: true, isCorrect: true, position: true },
+                    select: {
+                        id: true,
+                        contentText: true,
+                        imageUrl: true,
+                        isCorrect: true,
+                        position: true,
+                    },
                     orderBy: { position: 'asc' as const },
                 },
                 questionAcceptedAnswers: {
@@ -629,9 +686,14 @@ export class AttemptsService {
             orderBy: { position: 'asc' },
         });
 
+        const [decoratedResult, decoratedQuestions] = await Promise.all([
+            this.withAttemptMedia(result),
+            Promise.all(questions.map((question) => this.withQuestionMedia(question))),
+        ]);
+
         return {
-            ...result,
-            questions,
+            ...decoratedResult,
+            questions: decoratedQuestions,
             percentage:
                 result.totalQuestions === 0
                     ? 0
@@ -684,9 +746,102 @@ export class AttemptsService {
             },
         });
 
+        const decoratedQuestions = await Promise.all(
+            questions.map((question) => this.withQuestionMedia(question)),
+        );
+
         return {
             ...attempt,
-            questions,
+            questions: decoratedQuestions,
+        };
+    }
+
+    private async withOptionMedia<T extends { imageUrl?: string | null }>(
+        option: T,
+    ) {
+        if (!option.imageUrl) return option;
+
+        const resolved = await this.gcsStorage.resolveReadUrl(option.imageUrl);
+        return {
+            ...option,
+            imageUrl: resolved.url ?? option.imageUrl,
+            ...(resolved.storageUri
+                ? { imageStorageUri: resolved.storageUri }
+                : {}),
+        };
+    }
+
+    private async withQuestionMedia<
+        T extends {
+            imageUrl?: string | null;
+            hintImageUrl?: string | null;
+            explanationImageUrl?: string | null;
+            questionOptions?: Array<{ imageUrl?: string | null }>;
+        },
+    >(question: T) {
+        const mediaFields: Record<string, string> = {};
+
+        if (question.imageUrl) {
+            const resolved = await this.gcsStorage.resolveReadUrl(question.imageUrl);
+            mediaFields.imageUrl = resolved.url ?? question.imageUrl;
+            if (resolved.storageUri) mediaFields.imageStorageUri = resolved.storageUri;
+        }
+
+        if (question.hintImageUrl) {
+            const resolved = await this.gcsStorage.resolveReadUrl(question.hintImageUrl);
+            mediaFields.hintImageUrl = resolved.url ?? question.hintImageUrl;
+            if (resolved.storageUri) mediaFields.hintImageStorageUri = resolved.storageUri;
+        }
+
+        if (question.explanationImageUrl) {
+            const resolved = await this.gcsStorage.resolveReadUrl(
+                question.explanationImageUrl,
+            );
+            mediaFields.explanationImageUrl = resolved.url ?? question.explanationImageUrl;
+            if (resolved.storageUri) {
+                mediaFields.explanationImageStorageUri = resolved.storageUri;
+            }
+        }
+
+        return {
+            ...question,
+            ...mediaFields,
+            questionOptions: question.questionOptions
+                ? await Promise.all(
+                      question.questionOptions.map((option) =>
+                          this.withOptionMedia(option),
+                      ),
+                  )
+                : question.questionOptions,
+        };
+    }
+
+    private async withAttemptMedia<T extends {
+        attemptedAnswers?: Array<{
+            question?: {
+                imageUrl?: string | null;
+                hintImageUrl?: string | null;
+                explanationImageUrl?: string | null;
+                questionOptions?: Array<{ imageUrl?: string | null }>;
+            } | null;
+            selectedOption?: { imageUrl?: string | null } | null;
+        }>;
+    }>(attempt: T) {
+        if (!attempt.attemptedAnswers) return attempt;
+
+        return {
+            ...attempt,
+            attemptedAnswers: await Promise.all(
+                attempt.attemptedAnswers.map(async (answer) => ({
+                    ...answer,
+                    question: answer.question
+                        ? await this.withQuestionMedia(answer.question)
+                        : answer.question,
+                    selectedOption: answer.selectedOption
+                        ? await this.withOptionMedia(answer.selectedOption)
+                        : answer.selectedOption,
+                })),
+            ),
         };
     }
 

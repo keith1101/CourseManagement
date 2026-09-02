@@ -3,8 +3,13 @@ import {
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { QuestionType } from '../../generated/client/enums';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+    GcsStorageService,
+    StorageUploadFile,
+} from '../storage/gcs-storage.service';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
 import { CreateQuestionOptionDto, UpdateQuestionOptionDto } from './dto/question-option.dto';
@@ -27,6 +32,7 @@ const publicQuestionInclude = {
         select: {
             id: true,
             contentText: true,
+            imageUrl: true,
             position: true,
         },
         orderBy: {
@@ -42,7 +48,37 @@ type AnswerKeyOption = {
 
 @Injectable()
 export class QuestionsService {
-    constructor(private readonly prismaService: PrismaService) {}
+    constructor(
+        private readonly prismaService: PrismaService,
+        private readonly gcsStorage: GcsStorageService,
+    ) {}
+
+    async uploadImage(file: StorageUploadFile) {
+        if (!file.mimetype?.startsWith('image/')) {
+            throw new BadRequestException('Only image files are allowed');
+        }
+
+        if (file.size > 5 * 1024 * 1024) {
+            throw new BadRequestException('Image size cannot exceed 5 MB');
+        }
+
+        const safeFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
+        const objectName = `questions/${randomUUID()}-${safeFileName || 'image'}`;
+        const uploaded = await this.gcsStorage.upload(file, objectName);
+
+        try {
+            const url = await this.gcsStorage.getSignedReadUrl(uploaded.gsUri);
+            return {
+                url,
+                imageUrl: url,
+                storageUri: uploaded.gsUri,
+                expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+            };
+        } catch (error) {
+            await this.gcsStorage.delete(uploaded.gsUri).catch(() => undefined);
+            throw error;
+        }
+    }
 
     async create(examId: string, createQuestionDto: CreateQuestionDto) {
         const [exam, subject] = await Promise.all([
@@ -63,6 +99,7 @@ export class QuestionsService {
             throw new NotFoundException('Subject not found');
         }
 
+        this.validateImageReferences(createQuestionDto);
         this.validateAnswerKey(
             createQuestionDto.questionType,
             createQuestionDto.correctTextAnswer,
@@ -84,8 +121,11 @@ export class QuestionsService {
                     questionType: createQuestionDto.questionType,
                     contentText: createQuestionDto.contentText,
                     imageUrl: createQuestionDto.imageUrl,
+                    hintImageUrl: createQuestionDto.hintImageUrl,
+                    hint: createQuestionDto.hint,
                     instruction: createQuestionDto.instruction,
                     explaination: createQuestionDto.explaination,
+                    explanationImageUrl: createQuestionDto.explanationImageUrl,
                     timeLimitSeconds: createQuestionDto.timeLimitSeconds,
                     correctTextAnswer: createQuestionDto.correctTextAnswer,
                     position,
@@ -97,6 +137,7 @@ export class QuestionsService {
                     data: createQuestionDto.options.map((opt, index) => ({
                         questionId: question.id,
                         contentText: opt.contentText,
+                        imageUrl: opt.imageUrl,
                         isCorrect: opt.isCorrect ?? false,
                         position: opt.position ?? index,
                     })),
@@ -107,7 +148,9 @@ export class QuestionsService {
                 where: { id: question.id },
                 include: questionInclude,
             });
-        });
+        }).then((question) =>
+            question ? this.withQuestionMedia(question) : question,
+        );
     }
 
     async findByExam(examId: string, includeAnswers = false) {
@@ -120,7 +163,7 @@ export class QuestionsService {
             throw new NotFoundException('Exam not found');
         }
 
-        return this.prismaService.question.findMany({
+        const questions = await this.prismaService.question.findMany({
             where: {
                 examId,
                 deletedAt: null,
@@ -131,6 +174,8 @@ export class QuestionsService {
                 position: 'asc',
             },
         });
+
+        return Promise.all(questions.map((question) => this.withQuestionMedia(question)));
     }
 
     async find(id: string, includeAnswers = false) {
@@ -147,7 +192,7 @@ export class QuestionsService {
             throw new NotFoundException('Question not found');
         }
 
-        return question;
+        return this.withQuestionMedia(question);
     }
 
     async update(id: string, updateQuestionsDto: UpdateQuestionsDto) {
@@ -168,6 +213,7 @@ export class QuestionsService {
                 ? updateQuestionsDto.options
                 : existing.questionOptions;
 
+        this.validateImageReferences(updateQuestionsDto);
         this.validateAnswerKey(questionType, correctTextAnswer, options);
 
         return this.prismaService.$transaction(async (transaction) => {
@@ -189,6 +235,7 @@ export class QuestionsService {
                         data: options.map((opt, index) => ({
                             questionId: id,
                             contentText: opt.contentText,
+                            imageUrl: opt.imageUrl,
                             isCorrect: opt.isCorrect ?? false,
                             position: opt.position ?? index,
                         })),
@@ -200,7 +247,9 @@ export class QuestionsService {
                 where: { id },
                 include: questionInclude,
             });
-        });
+        }).then((question) =>
+            question ? this.withQuestionMedia(question) : question,
+        );
     }
 
     async updateOrder(id: string, order: number) {
@@ -277,7 +326,9 @@ export class QuestionsService {
                 where: { id },
                 include: questionInclude,
             });
-        });
+        }).then((questionResult) =>
+            questionResult ? this.withQuestionMedia(questionResult) : questionResult,
+        );
     }
 
     async deleteQuestion(id: string) {
@@ -322,6 +373,8 @@ export class QuestionsService {
     async createOption(questionId: string, dto: CreateQuestionOptionDto) {
         const question = await this.find(questionId, true);
 
+        this.validateImageReference(dto.imageUrl);
+
         this.validateAnswerKey(
             question.questionType,
             question.correctTextAnswer,
@@ -335,17 +388,21 @@ export class QuestionsService {
             where: { questionId },
         }));
 
-        return this.prismaService.questionOption.create({
+        const option = await this.prismaService.questionOption.create({
             data: {
                 questionId,
                 contentText: dto.contentText,
+                imageUrl: dto.imageUrl,
                 isCorrect: dto.isCorrect ?? false,
                 position,
             },
         });
+
+        return this.withOptionMedia(option);
     }
 
     async updateOption(optionId: string, dto: UpdateQuestionOptionDto) {
+        this.validateImageReference(dto.imageUrl);
         const option = await this.prismaService.questionOption.findUnique({
             where: { id: optionId },
             select: {
@@ -384,10 +441,12 @@ export class QuestionsService {
             })),
         );
 
-        return this.prismaService.questionOption.update({
+        const updatedOption = await this.prismaService.questionOption.update({
             where: { id: optionId },
             data: dto,
         });
+
+        return this.withOptionMedia(updatedOption);
     }
 
     async deleteOption(optionId: string) {
@@ -439,6 +498,103 @@ export class QuestionsService {
         if (!subject || !subject.isActive) {
             throw new NotFoundException('Subject not found');
         }
+    }
+
+    private validateImageReferences(
+        dto: CreateQuestionDto | UpdateQuestionsDto,
+    ) {
+        this.validateImageReference(dto.imageUrl);
+        this.validateImageReference(dto.hintImageUrl);
+        this.validateImageReference(dto.explanationImageUrl);
+        dto.options?.forEach((option) =>
+            this.validateImageReference(option.imageUrl),
+        );
+    }
+
+    private validateImageReference(reference?: string | null) {
+        const value = reference?.trim();
+        if (!value) return;
+
+        if (value.length > 2048) {
+            throw new BadRequestException('Image URL cannot exceed 2048 characters');
+        }
+
+        if (value.startsWith('gs://')) return;
+
+        if (value.startsWith('data:')) {
+            throw new BadRequestException(
+                'Base64 image data is not accepted. Upload the image first',
+            );
+        }
+
+        try {
+            const url = new URL(value);
+            if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+                throw new Error('Unsupported image protocol');
+            }
+        } catch {
+            throw new BadRequestException('Image URL must be a valid HTTP(S) URL');
+        }
+    }
+
+    private async withOptionMedia<T extends { imageUrl?: string | null }>(
+        option: T,
+    ) {
+        if (!option.imageUrl) return option;
+
+        const resolved = await this.gcsStorage.resolveReadUrl(option.imageUrl);
+        return {
+            ...option,
+            imageUrl: resolved.url,
+            ...(resolved.storageUri
+                ? { imageStorageUri: resolved.storageUri }
+                : {}),
+        };
+    }
+
+    private async withQuestionMedia<
+        T extends {
+            imageUrl?: string | null;
+            hintImageUrl?: string | null;
+            explanationImageUrl?: string | null;
+            questionOptions?: Array<{ imageUrl?: string | null }>;
+        },
+    >(question: T) {
+        const mediaFields: Record<string, string> = {};
+
+        if (question.imageUrl) {
+            const resolved = await this.gcsStorage.resolveReadUrl(question.imageUrl);
+            mediaFields.imageUrl = resolved.url ?? question.imageUrl;
+            if (resolved.storageUri) mediaFields.imageStorageUri = resolved.storageUri;
+        }
+
+        if (question.hintImageUrl) {
+            const resolved = await this.gcsStorage.resolveReadUrl(question.hintImageUrl);
+            mediaFields.hintImageUrl = resolved.url ?? question.hintImageUrl;
+            if (resolved.storageUri) mediaFields.hintImageStorageUri = resolved.storageUri;
+        }
+
+        if (question.explanationImageUrl) {
+            const resolved = await this.gcsStorage.resolveReadUrl(
+                question.explanationImageUrl,
+            );
+            mediaFields.explanationImageUrl = resolved.url ?? question.explanationImageUrl;
+            if (resolved.storageUri) {
+                mediaFields.explanationImageStorageUri = resolved.storageUri;
+            }
+        }
+
+        return {
+            ...question,
+            ...mediaFields,
+            questionOptions: question.questionOptions
+                ? await Promise.all(
+                      question.questionOptions.map((option) =>
+                          this.withOptionMedia(option),
+                      ),
+                  )
+                : question.questionOptions,
+        };
     }
 
     private validateAnswerKey(

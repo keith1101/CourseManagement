@@ -1,4 +1,5 @@
 import {
+    BadRequestException,
     Body,
     Controller,
     Delete,
@@ -7,8 +8,11 @@ import {
     Patch,
     Post,
     Request,
+    UploadedFile,
+    UseInterceptors,
     UseGuards,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,6 +21,7 @@ import { QuestionsService } from './questions.service';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
 import { UpdateQuestionOrderDto } from './dto/update-question-order.dto';
 import { CreateQuestionOptionDto, UpdateQuestionOptionDto } from './dto/question-option.dto';
+import { StorageUploadFile } from '../storage/gcs-storage.service';
 
 type AuthenticatedRequest = {
     user: { role: UserRole };
@@ -27,6 +32,29 @@ type AuthenticatedRequest = {
 @Controller('questions')
 export class QuestionsController {
     constructor(private readonly questionsService: QuestionsService) {}
+
+    @Roles(UserRole.ADMIN)
+    @Post('images')
+    @UseInterceptors(
+        FileInterceptor('file', {
+            limits: { fileSize: 5 * 1024 * 1024 },
+            fileFilter: (_request, file, callback) => {
+                if (!file.mimetype?.startsWith('image/')) {
+                    callback(new Error('Only image files are allowed'), false);
+                    return;
+                }
+
+                callback(null, true);
+            },
+        }),
+    )
+    uploadImage(@UploadedFile() file: StorageUploadFile | undefined) {
+        if (!file) {
+            throw new BadRequestException('Image file is required');
+        }
+
+        return this.questionsService.uploadImage(file);
+    }
 
     @Get(':id')
     showDetail(@Param('id') id: string, @Request() request: AuthenticatedRequest) {

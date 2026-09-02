@@ -131,8 +131,11 @@ model Question {
   questionType            QuestionType
   contentText             String
   imageUrl                String?
+  hintImageUrl            String?
+  hint                    String?
   instruction             String?
   explaination            String?
+  explanationImageUrl     String?
   timeLimitSeconds        Int
   // Used for SHORT_ANSWER; MULTIPLE_CHOICE uses QuestionOption.isCorrect.
   correctTextAnswer       String?
@@ -152,6 +155,7 @@ model QuestionOption {
   questionId     String
   question       Question        @relation(fields: [questionId], references: [id])
   contentText    String
+  imageUrl       String?
   isCorrect      Boolean         @default(false)
   position       Int
   createdAt      DateTime        @default(now())

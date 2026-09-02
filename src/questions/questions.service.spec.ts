@@ -6,6 +6,7 @@ import { QuestionsService } from './questions.service';
 describe('QuestionsService', () => {
   let service: QuestionsService;
   let prisma: any;
+  let gcsStorage: any;
   let transaction: any;
 
   beforeEach(() => {
@@ -43,7 +44,59 @@ describe('QuestionsService', () => {
       },
       $transaction: jest.fn((callback: (tx: any) => unknown) => callback(transaction)),
     };
-    service = new QuestionsService(prisma as PrismaService);
+    gcsStorage = {
+      upload: jest.fn(),
+      delete: jest.fn(),
+      getSignedReadUrl: jest.fn(),
+      resolveReadUrl: jest.fn(async (storageUri: string | null | undefined) => ({
+        url: storageUri,
+        storageUri: storageUri?.startsWith('gs://') ? storageUri : undefined,
+      })),
+    };
+    service = new QuestionsService(prisma as PrismaService, gcsStorage);
+  });
+
+  it('uploads an image to question storage and returns a signed reference', async () => {
+    gcsStorage.upload.mockResolvedValue({
+      objectName: 'questions/image-1.png',
+      gsUri: 'gs://bucket/questions/image-1.png',
+    });
+    gcsStorage.getSignedReadUrl.mockResolvedValue('https://signed.example/image-1.png');
+
+    const result = await service.uploadImage({
+      buffer: Buffer.from('image'),
+      originalname: 'question image.png',
+      mimetype: 'image/png',
+      size: 5,
+    });
+
+    expect(gcsStorage.upload).toHaveBeenCalledWith(
+      expect.objectContaining({ originalname: 'question image.png' }),
+      expect.stringMatching(/^questions\/[0-9a-f-]+-question-image\.png$/),
+    );
+    expect(result).toEqual({
+      url: 'https://signed.example/image-1.png',
+      imageUrl: 'https://signed.example/image-1.png',
+      storageUri: 'gs://bucket/questions/image-1.png',
+      expiresAt: expect.any(String),
+    });
+  });
+
+  it('rejects Base64 image references in question JSON', async () => {
+    prisma.exam.findUnique.mockResolvedValue({ id: 'exam-1' });
+    prisma.subject.findUnique.mockResolvedValue({ id: 'subject-1', isActive: true });
+
+    await expect(
+      service.create('exam-1', {
+        questionType: QuestionType.MULTIPLE_CHOICE,
+        subjectId: 'subject-1',
+        contentText: 'Question',
+        imageUrl: 'data:image/png;base64,abc',
+        timeLimitSeconds: 30,
+        options: [{ contentText: 'A', isCorrect: true }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('rejects creation when the exam does not exist', async () => {
@@ -281,6 +334,7 @@ describe('QuestionsService', () => {
     expect(include.questionOptions.select).toEqual({
       id: true,
       contentText: true,
+      imageUrl: true,
       position: true,
     });
     expect(include).not.toHaveProperty('questionAcceptedAnswers');

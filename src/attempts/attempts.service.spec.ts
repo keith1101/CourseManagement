@@ -14,6 +14,7 @@ import { AttemptsService } from './attempts.service';
 describe('AttemptsService', () => {
   let service: AttemptsService;
   let prisma: any;
+  let gcsStorage: any;
 
   beforeEach(() => {
     prisma = {
@@ -33,7 +34,13 @@ describe('AttemptsService', () => {
         examAttempt: { update: jest.fn() },
       })),
     };
-    service = new AttemptsService(prisma as PrismaService);
+    gcsStorage = {
+      resolveReadUrl: jest.fn(async (storageUri: string | null | undefined) => ({
+        url: storageUri,
+        storageUri: storageUri?.startsWith('gs://') ? storageUri : undefined,
+      })),
+    };
+    service = new AttemptsService(prisma as PrismaService, gcsStorage);
   });
 
   it('starts an attempt for a published free exam', async () => {
@@ -100,7 +107,7 @@ describe('AttemptsService', () => {
     });
 
     const result = await service.saveAnswer('attempt-1', 'student-1', {
-      questionId: 'question-1', rawValue: 'Paris',
+      questionId: 'question-1', rawValue: 'Paris', finalize: true,
     });
 
     expect(prisma.attemptAnswer.create).toHaveBeenCalledWith({
@@ -108,6 +115,43 @@ describe('AttemptsService', () => {
     });
     expect(result.selectedOptionId).toBeNull();
     expect(result.isCorrect).toBe(true);
+  });
+
+  it('saves a multiple-choice draft without grading or revealing the answer key', async () => {
+    prisma.examAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+    });
+    prisma.question.findFirst.mockResolvedValue({
+      id: 'question-1', position: 0, questionType: QuestionType.MULTIPLE_CHOICE,
+      correctTextAnswer: null, explaination: 'Because this is correct.',
+      explanationImageUrl: 'gs://bucket/explanation.png',
+      questionOptions: [
+        { id: 'valid-option', contentText: 'A', isCorrect: true },
+        { id: 'other-option', contentText: 'B', isCorrect: false },
+      ],
+      questionAcceptedAnswers: [],
+    });
+    prisma.attemptAnswer.findFirst.mockResolvedValue(null);
+    prisma.attemptAnswer.create.mockImplementation(async ({ data }: any) => ({
+      id: 'answer-1',
+      attemptId: 'attempt-1',
+      ...data,
+    }));
+
+    const result = await service.saveAnswer('attempt-1', 'student-1', {
+      questionId: 'question-1', selectedOptionId: 'valid-option',
+    });
+
+    expect(prisma.attemptAnswer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        selectedOptionId: 'valid-option',
+        isCorrect: false,
+      }),
+    });
+    expect(result.isCorrect).toBeUndefined();
+    expect(result.correctOptionId).toBeUndefined();
+    expect(result.explanation).toBeUndefined();
+    expect(gcsStorage.resolveReadUrl).not.toHaveBeenCalled();
   });
 
   it('rejects a multiple-choice option belonging to another question', async () => {
@@ -125,6 +169,34 @@ describe('AttemptsService', () => {
       questionId: 'question-1', selectedOptionId: 'option-from-other-question',
     })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.attemptAnswer.create).not.toHaveBeenCalled();
+  });
+
+  it('stores a timed-out unanswered multiple-choice question without an invalid option id', async () => {
+    prisma.examAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+    });
+    prisma.question.findFirst.mockResolvedValue({
+      id: 'question-1', position: 0, questionType: QuestionType.MULTIPLE_CHOICE,
+      correctTextAnswer: null, explaination: null, questionOptions: [
+        { id: 'valid-option', contentText: 'A', isCorrect: true },
+      ], questionAcceptedAnswers: [],
+    });
+    prisma.attemptAnswer.findFirst.mockResolvedValue(null);
+    prisma.attemptAnswer.create.mockResolvedValue({
+      id: 'answer-1', attemptId: 'attempt-1', questionId: 'question-1', selectedOptionId: null,
+      answerType: AnswerValueType.TEXT, rawValue: '', normalizedText: '', content: null,
+      position: 0, numericValue: null, isCorrect: false,
+    });
+
+    const result = await service.saveAnswer('attempt-1', 'student-1', {
+      questionId: 'question-1', selectedOptionId: '', timedOut: true,
+    });
+
+    expect(prisma.attemptAnswer.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ selectedOptionId: null, rawValue: '' }),
+    });
+    expect(result.selectedOptionId).toBeNull();
+    expect(result.timedOut).toBe(true);
   });
 
   it('enforces attempt ownership', async () => {

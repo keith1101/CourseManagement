@@ -30,11 +30,23 @@ export class CreateQuestionDto {
 
     @IsOptional()
     @IsString()
+    hintImageUrl?: string;
+
+    @IsOptional()
+    @IsString()
+    hint?: string;
+
+    @IsOptional()
+    @IsString()
     instruction?: string;
 
     @IsOptional()
     @IsString()
     explaination?: string;
+
+    @IsOptional()
+    @IsString()
+    explanationImageUrl?: string;
 
     @IsInt()
     @Min(1)

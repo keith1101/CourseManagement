@@ -71,6 +71,21 @@ export class GcsStorageService {
     return url;
   }
 
+  async resolveReadUrl(storageUri: string | null | undefined) {
+    if (!storageUri) {
+      return { url: storageUri ?? null, storageUri: undefined };
+    }
+
+    if (!storageUri.startsWith('gs://')) {
+      return { url: storageUri, storageUri: undefined };
+    }
+
+    return {
+      url: await this.getSignedReadUrl(storageUri),
+      storageUri,
+    };
+  }
+
   private getBucket() {
     if (!this.bucketName) {
       throw new InternalServerErrorException(

@@ -35,4 +35,8 @@ export class SaveAttemptAnswerDto {
     @IsOptional()
     @IsBoolean()
     timedOut?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    finalize?: boolean;
 }
