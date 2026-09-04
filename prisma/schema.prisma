@@ -121,6 +121,8 @@ model Exam {
   questions       Question[]
   examAssignments ExamAssignment[]
   examAttempts    ExamAttempt[]
+
+  @@index([deletedAt])
 }
 
 model Question {
