@@ -2,11 +2,66 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { QuestionType } from '../../generated/client/enums';
 import { PrismaService } from '../prisma/prisma.service';
 import { QuestionsService } from './questions.service';
+import { studentQuestionSelect } from './question-response';
+
+const FORBIDDEN_STUDENT_KEYS = new Set([
+  'correctTextAnswer',
+  'questionAcceptedAnswers',
+  'acceptedAnswers',
+  'isCorrect',
+  'correctOptionId',
+  'correctOptionIds',
+  'correctAnswer',
+  'correctAnswers',
+  'answerKey',
+  'gradingKey',
+  'explaination',
+  'explanation',
+  'explanationImageUrl',
+  'explanationImageStorageUri',
+]);
+
+function forbiddenStudentKeys(value: unknown, path = 'root'): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => forbiddenStudentKeys(item, `${path}[${index}]`));
+  }
+  if (!value || typeof value !== 'object') return [];
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => [
+    ...(FORBIDDEN_STUDENT_KEYS.has(key) ? [`${path}.${key}`] : []),
+    ...forbiddenStudentKeys(nestedValue, `${path}.${key}`),
+  ]);
+}
+
+const questionWithAnswerData = {
+  id: 'question-1',
+  examId: 'exam-1',
+  subjectId: 'subject-1',
+  questionType: QuestionType.MULTIPLE_CHOICE,
+  contentText: 'Question',
+  imageUrl: null,
+  hintImageUrl: null,
+  hint: 'A safe hint',
+  instruction: null,
+  timeLimitSeconds: 30,
+  position: 0,
+  correctTextAnswer: 'secret short answer',
+  explaination: 'The answer is A',
+  explanationImageUrl: 'gs://bucket/explanation.png',
+  questionOptions: [
+    { id: 'correct-option', contentText: 'A', imageUrl: null, isCorrect: true, position: 0 },
+    { id: 'wrong-option', contentText: 'B', imageUrl: null, isCorrect: false, position: 1 },
+  ],
+  questionAcceptedAnswers: [
+    { id: 'accepted-1', rawValue: 'secret short answer', answerType: 'TEXT', isCorrect: true, position: 0 },
+  ],
+};
 
 describe('QuestionsService', () => {
   let service: QuestionsService;
   let prisma: any;
   let gcsStorage: any;
+  let examsService: any;
   let transaction: any;
 
   beforeEach(() => {
@@ -53,7 +108,10 @@ describe('QuestionsService', () => {
         storageUri: storageUri?.startsWith('gs://') ? storageUri : undefined,
       })),
     };
-    service = new QuestionsService(prisma as PrismaService, gcsStorage);
+    examsService = {
+      assertStudentCanAccessExam: jest.fn(),
+    };
+    service = new QuestionsService(prisma as PrismaService, gcsStorage, examsService);
   });
 
   it('uploads an image to question storage and returns a signed reference', async () => {
@@ -325,18 +383,81 @@ describe('QuestionsService', () => {
     );
   });
 
-  it('does not select correctness metadata for public question reads', async () => {
-    prisma.question.findFirst.mockResolvedValue({ id: 'question-1', questionOptions: [] });
+  it('filters answer keys from a published multiple-choice student question response', async () => {
+    prisma.question.findFirst.mockResolvedValue(questionWithAnswerData);
 
-    await service.find('question-1');
+    const result = await service.find('question-1');
 
-    const include = prisma.question.findFirst.mock.calls[0][0].include;
-    expect(include.questionOptions.select).toEqual({
-      id: true,
-      contentText: true,
-      imageUrl: true,
-      position: true,
+    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(result).toEqual(expect.objectContaining({
+      id: 'question-1',
+      questionType: QuestionType.MULTIPLE_CHOICE,
+      questionOptions: [
+        expect.objectContaining({ id: 'correct-option', contentText: 'A' }),
+        expect.objectContaining({ id: 'wrong-option', contentText: 'B' }),
+      ],
+    }));
+    expect(prisma.question.findFirst.mock.calls[0][0].select).toEqual(
+      studentQuestionSelect,
+    );
+  });
+
+  it('filters answer keys from the student exam question collection', async () => {
+    prisma.exam.findUnique.mockResolvedValue({ id: 'exam-1' });
+    prisma.question.findMany.mockResolvedValue([questionWithAnswerData]);
+
+    const result = await service.findByExam('exam-1', false, 'student-1');
+
+    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(prisma.question.findMany.mock.calls[0][0].select).toEqual(
+      studentQuestionSelect,
+    );
+    expect(examsService.assertStudentCanAccessExam).toHaveBeenCalledWith(
+      'exam-1',
+      'student-1',
+    );
+  });
+
+  it('does not load an exam question collection without student authorization context', async () => {
+    await expect(service.findByExam('exam-1')).rejects.toThrow(
+      'Authenticated student context is required',
+    );
+    expect(prisma.question.findMany).not.toHaveBeenCalled();
+  });
+
+  it('filters correct text and accepted answers from a short-answer student response', async () => {
+    prisma.question.findFirst.mockResolvedValue({
+      ...questionWithAnswerData,
+      questionType: QuestionType.SHORT_ANSWER,
+      correctTextAnswer: 'Paris',
+      questionOptions: [],
+      questionAcceptedAnswers: [
+        { id: 'accepted-1', rawValue: 'Paris', answerType: 'TEXT', isCorrect: true, position: 0 },
+      ],
     });
-    expect(include).not.toHaveProperty('questionAcceptedAnswers');
+
+    const result = await service.find('question-1');
+
+    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(result.questionType).toBe(QuestionType.SHORT_ANSWER);
+    expect(result.questionOptions).toEqual([]);
+  });
+
+  it('preserves answer data for admin question management reads', async () => {
+    prisma.question.findFirst.mockResolvedValue(questionWithAnswerData);
+
+    const result = await service.find('question-1', true);
+
+    expect(result).toEqual(expect.objectContaining({
+      correctTextAnswer: 'secret short answer',
+      questionOptions: expect.arrayContaining([
+        expect.objectContaining({ id: 'correct-option', isCorrect: true }),
+      ]),
+      questionAcceptedAnswers: expect.arrayContaining([
+        expect.objectContaining({ rawValue: 'secret short answer' }),
+      ]),
+    }));
+    expect(prisma.question.findFirst.mock.calls[0][0].include).toBeDefined();
   });
 });

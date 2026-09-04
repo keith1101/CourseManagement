@@ -28,11 +28,14 @@ describe('integrated module authorization metadata', () => {
     ]);
   });
 
-  it('allows Students to read questions but restricts mutations to Admin', () => {
+  it('restricts direct question-by-ID retrieval and mutations to Admin', () => {
     expect(Reflect.getMetadata(ROLES_KEY, QuestionsController)).toEqual([
       UserRole.ADMIN,
       UserRole.STUDENT,
     ]);
+    expect(
+      Reflect.getMetadata(ROLES_KEY, QuestionsController.prototype.showDetail),
+    ).toEqual([UserRole.ADMIN]);
     expect(
       Reflect.getMetadata(ROLES_KEY, QuestionsController.prototype.update),
     ).toEqual([UserRole.ADMIN]);

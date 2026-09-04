@@ -138,6 +138,28 @@ describe('ExamsService', () => {
     });
   });
 
+  it('applies the same published and Free/Pro rules to question collections', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      accessLevel: AccessLevel.FREE,
+      proExpiresAt: null,
+      isActive: true,
+    });
+    prisma.exam.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.assertStudentCanAccessExam('exam-1', 'student-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.exam.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'exam-1',
+        status: ExamStatus.PUBLISHED,
+        accessLevel: AccessLevel.FREE,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+  });
+
   it('does not include Questions or answer data in the exam response query', async () => {
     prisma.user.findUnique.mockResolvedValue({
       accessLevel: AccessLevel.FREE,

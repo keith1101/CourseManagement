@@ -72,15 +72,9 @@ export class ExamsService {
   }
 
   async findOne(id: string, viewer: Viewer) {
-    const where: Prisma.ExamWhereInput = { id, deletedAt: null };
-
-    if (viewer.role === UserRole.STUDENT) {
-      const access = await this.getStudentAccess(viewer.userId);
-      where.status = ExamStatus.PUBLISHED;
-      if (!access.isPro) {
-        where.accessLevel = AccessLevel.FREE;
-      }
-    }
+    const where = viewer.role === UserRole.STUDENT
+      ? await this.getStudentExamWhere(id, viewer.userId)
+      : { id, deletedAt: null };
 
     const exam = await this.prisma.exam.findFirst({
       where,
@@ -92,6 +86,17 @@ export class ExamsService {
     }
 
     return exam;
+  }
+
+  async assertStudentCanAccessExam(id: string, userId: string) {
+    const exam = await this.prisma.exam.findFirst({
+      where: await this.getStudentExamWhere(id, userId),
+      select: { id: true },
+    });
+
+    if (!exam) {
+      throw new NotFoundException('Exam not found');
+    }
   }
 
   async update(id: string, updateExamDto: UpdateExamDto) {
@@ -208,6 +213,17 @@ export class ExamsService {
         user.accessLevel === AccessLevel.PRO &&
         (!user.proExpiresAt || user.proExpiresAt.getTime() > Date.now()),
     };
+  }
+
+  private async getStudentExamWhere(id: string, userId: string) {
+    const access = await this.getStudentAccess(userId);
+
+    return {
+      id,
+      deletedAt: null,
+      status: ExamStatus.PUBLISHED,
+      ...(access.isPro ? {} : { accessLevel: AccessLevel.FREE }),
+    } satisfies Prisma.ExamWhereInput;
   }
 
 }

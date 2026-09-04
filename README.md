@@ -225,7 +225,7 @@ Questions module quản lý câu hỏi trong đề thi. Khi tạo hoặc đổi 
 | ------ | -------------------------- | ---------------------------- | ------------- | ---------- |
 | GET    | `/api/exams/:examId/questions` | Lấy danh sách câu hỏi của đề | Student/Admin | Done       |
 | POST   | `/api/exams/:examId/questions` | Thêm câu hỏi vào đề thi      | Admin         | Done       |
-| GET    | `/api/questions/:id`           | Xem chi tiết câu hỏi         | Student/Admin | Done       |
+| GET    | `/api/questions/:id`           | Xem chi tiết câu hỏi         | Admin         | Done       |
 | PATCH  | `/api/questions/:id`           | Cập nhật câu hỏi             | Admin         | Done       |
 | PATCH  | `/api/questions/:id/order`     | Thay đổi thứ tự câu hỏi      | Admin         | Done       |
 | DELETE | `/api/questions/:id`           | Xóa câu hỏi                  | Admin         | Done       |
@@ -243,7 +243,7 @@ Câu hỏi hỗ trợ:
 * Hướng dẫn
 * Thời gian riêng cho từng câu
 
-Ghi chú: Khi học sinh xem câu hỏi, hệ thống không trả về đáp án đúng trước thời điểm cho phép.
+Ghi chú: Học sinh nhận câu hỏi qua luồng attempt đã xác thực; endpoint chi tiết theo question ID chỉ dành cho Admin. Các response dành cho học sinh không trả về đáp án đúng trước thời điểm cho phép.
 
 ## 7. Assignments Module
 

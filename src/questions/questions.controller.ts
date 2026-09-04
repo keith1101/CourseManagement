@@ -56,6 +56,10 @@ export class QuestionsController {
         return this.questionsService.uploadImage(file);
     }
 
+    // Student question delivery uses the authenticated exam/attempt flow.
+    // Direct question management retrieval is Admin-only so a question ID
+    // cannot be used to bypass exam/attempt authorization.
+    @Roles(UserRole.ADMIN)
     @Get(':id')
     showDetail(@Param('id') id: string, @Request() request: AuthenticatedRequest) {
         return this.questionsService.find(id, request.user.role === UserRole.ADMIN);

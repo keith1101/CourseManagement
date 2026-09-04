@@ -15,32 +15,78 @@ import { GcsStorageService } from '../storage/gcs-storage.service';
 import { AttemptQueryDto } from './dto/attempt-query.dto';
 import { SaveAttemptAnswerDto } from './dto/save-attempt-answer.dto';
 import { StartAttemptDto } from './dto/start-attempt.dto';
+import {
+    StudentQuestion,
+    StudentQuestionOption,
+    sanitizeStudentQuestion,
+    sanitizeStudentQuestionOption,
+    studentQuestionSelect,
+} from '../questions/question-response';
 
-const safeQuestionSelect = {
+const studentAttemptAnswerSelect = {
     id: true,
-    examId: true,
-    questionType: true,
-    contentText: true,
-    imageUrl: true,
-    hintImageUrl: true,
-    hint: true,
-    instruction: true,
-    explaination: true,
-    explanationImageUrl: true,
-    timeLimitSeconds: true,
+    questionId: true,
+    selectedOptionId: true,
+    answerType: true,
+    rawValue: true,
+    normalizedText: true,
+    content: true,
+    numericValue: true,
     position: true,
-    questionOptions: {
+    createdAt: true,
+    updatedAt: true,
+    question: {
+        select: studentQuestionSelect,
+    },
+    selectedOption: {
         select: {
             id: true,
             contentText: true,
             imageUrl: true,
             position: true,
         },
+    },
+} as const;
+
+// Completed student results retain aggregate scoring and submitted values,
+// but follow the least-disclosure policy for answer keys and explanations.
+const studentResultSelect = {
+    id: true,
+    userId: true,
+    examId: true,
+    status: true,
+    submittedAt: true,
+    correctCount: true,
+    totalQuestions: true,
+    exam: {
+        select: {
+            id: true,
+            title: true,
+        },
+    },
+    attemptedAnswers: {
+        select: studentAttemptAnswerSelect,
         orderBy: {
             position: 'asc' as const,
         },
     },
 } as const;
+
+type StudentAttemptAnswer = {
+    id: string;
+    questionId: string;
+    selectedOptionId: string | null;
+    answerType: AnswerValueType;
+    rawValue: string;
+    normalizedText: string | null;
+    content: string | null;
+    numericValue: number | null;
+    position: number;
+    createdAt?: Date;
+    updatedAt?: Date;
+    question?: StudentQuestion | null;
+    selectedOption?: StudentQuestionOption | null;
+};
 
 const attemptDetailSelect = {
     id: true,
@@ -76,30 +122,7 @@ const attemptDetailSelect = {
         },
     },
     attemptedAnswers: {
-        select: {
-            id: true,
-            questionId: true,
-            selectedOptionId: true,
-            answerType: true,
-            rawValue: true,
-            normalizedText: true,
-            content: true,
-            numericValue: true,
-            position: true,
-            createdAt: true,
-            updatedAt: true,
-            question: {
-                select: safeQuestionSelect,
-            },
-            selectedOption: {
-                select: {
-                    id: true,
-                    contentText: true,
-                    imageUrl: true,
-                    position: true,
-                },
-            },
-        },
+        select: studentAttemptAnswerSelect,
         orderBy: {
             position: 'asc' as const,
         },
@@ -326,8 +349,6 @@ export class AttemptsService {
                 position: true,
                 questionType: true,
                 correctTextAnswer: true,
-                explaination: true,
-                explanationImageUrl: true,
                 questionOptions: {
                     select: {
                         id: true,
@@ -341,7 +362,6 @@ export class AttemptsService {
                         rawValue: true,
                         normalizedText: true,
                         numericValue: true,
-                        isPrimary: true,
                     },
                 },
             },
@@ -434,10 +454,8 @@ export class AttemptsService {
                   },
               });
 
-        const explanationImage = shouldEvaluate && question.explanationImageUrl
-            ? (await this.gcsStorage.resolveReadUrl(question.explanationImageUrl)).url
-            : undefined;
-
+        // Grading is persisted for final submission, but never returned while
+        // the attempt is still in progress.
         return {
             id: answer.id,
             attemptId: answer.attemptId,
@@ -449,24 +467,7 @@ export class AttemptsService {
             content: answer.content,
             position: answer.position,
             numericValue: answer.numericValue,
-            // A draft save must not expose grading state or answer keys. The
-            // final submit endpoint evaluates every persisted answer again.
-            isCorrect: shouldEvaluate ? answer.isCorrect : undefined,
             timedOut: !!saveAttemptAnswerDto.timedOut,
-            ...(shouldEvaluate
-                ? {
-                      correctOptionId: question.questionOptions.find(
-                          (option) => option.isCorrect,
-                      )?.id,
-                      correctTextAnswer:
-                          question.correctTextAnswer ??
-                          question.questionAcceptedAnswers.find(
-                              (accepted) => accepted.isPrimary,
-                          )?.rawValue,
-                      explanation: question.explaination,
-                      explanationImage,
-                  }
-                : {}),
         };
     }
 
@@ -572,80 +573,7 @@ export class AttemptsService {
 
         const result = await this.prisma.examAttempt.findUnique({
             where: { id: attemptId },
-            select: {
-                id: true,
-                userId: true,
-                examId: true,
-                status: true,
-                submittedAt: true,
-                correctCount: true,
-                totalQuestions: true,
-                exam: {
-                    select: {
-                        id: true,
-                        title: true,
-                    },
-                },
-                attemptedAnswers: {
-                    select: {
-                        id: true,
-                        questionId: true,
-                        selectedOptionId: true,
-                        answerType: true,
-                        rawValue: true,
-                        normalizedText: true,
-                        content: true,
-                        isCorrect: true,
-                        position: true,
-                        numericValue: true,
-                        question: {
-                            select: {
-                                id: true,
-                                questionType: true,
-                                contentText: true,
-                                imageUrl: true,
-                                hintImageUrl: true,
-                                hint: true,
-                                explaination: true,
-                                explanationImageUrl: true,
-                                instruction: true,
-                                correctTextAnswer: true,
-                                questionOptions: {
-                                    select: {
-                                        id: true,
-                                        contentText: true,
-                                        imageUrl: true,
-                                        isCorrect: true,
-                                        position: true,
-                                    },
-                                    orderBy: {
-                                        position: 'asc' as const,
-                                    },
-                                },
-                                questionAcceptedAnswers: {
-                                    select: {
-                                        answerType: true,
-                                        rawValue: true,
-                                        normalizedText: true,
-                                        numericValue: true,
-                                    },
-                                },
-                            },
-                        },
-                        selectedOption: {
-                            select: {
-                                id: true,
-                                contentText: true,
-                                imageUrl: true,
-                                position: true,
-                            },
-                        },
-                    },
-                    orderBy: {
-                        position: 'asc' as const,
-                    },
-                },
-            },
+            select: studentResultSelect,
         });
 
         if (!result) {
@@ -654,35 +582,7 @@ export class AttemptsService {
 
         const questions = await this.prisma.question.findMany({
             where: { examId: result.examId, deletedAt: null },
-            select: {
-                id: true,
-                examId: true,
-                questionType: true,
-                contentText: true,
-                imageUrl: true,
-                hintImageUrl: true,
-                hint: true,
-                instruction: true,
-                explaination: true,
-                explanationImageUrl: true,
-                timeLimitSeconds: true,
-                correctTextAnswer: true,
-                position: true,
-                questionOptions: {
-                    select: {
-                        id: true,
-                        contentText: true,
-                        imageUrl: true,
-                        isCorrect: true,
-                        position: true,
-                    },
-                    orderBy: { position: 'asc' as const },
-                },
-                questionAcceptedAnswers: {
-                    select: { answerType: true, rawValue: true, normalizedText: true, numericValue: true, isPrimary: true },
-                    orderBy: { position: 'asc' as const },
-                },
-            },
+            select: studentQuestionSelect,
             orderBy: { position: 'asc' },
         });
 
@@ -693,7 +593,9 @@ export class AttemptsService {
 
         return {
             ...decoratedResult,
-            questions: decoratedQuestions,
+            questions: decoratedQuestions.map((question) =>
+                sanitizeStudentQuestion(question),
+            ),
             percentage:
                 result.totalQuestions === 0
                     ? 0
@@ -740,7 +642,7 @@ export class AttemptsService {
                 examId: attempt.examId,
                 deletedAt: null,
             },
-            select: safeQuestionSelect,
+            select: studentQuestionSelect,
             orderBy: {
                 position: 'asc',
             },
@@ -752,11 +654,13 @@ export class AttemptsService {
 
         return {
             ...attempt,
-            questions: decoratedQuestions,
+            questions: decoratedQuestions.map((question) =>
+                sanitizeStudentQuestion(question),
+            ),
         };
     }
 
-    private async withOptionMedia<T extends { imageUrl?: string | null }>(
+    private async withOptionMedia<T extends StudentQuestionOption>(
         option: T,
     ) {
         if (!option.imageUrl) return option;
@@ -771,14 +675,7 @@ export class AttemptsService {
         };
     }
 
-    private async withQuestionMedia<
-        T extends {
-            imageUrl?: string | null;
-            hintImageUrl?: string | null;
-            explanationImageUrl?: string | null;
-            questionOptions?: Array<{ imageUrl?: string | null }>;
-        },
-    >(question: T) {
+    private async withQuestionMedia<T extends StudentQuestion>(question: T) {
         const mediaFields: Record<string, string> = {};
 
         if (question.imageUrl) {
@@ -791,16 +688,6 @@ export class AttemptsService {
             const resolved = await this.gcsStorage.resolveReadUrl(question.hintImageUrl);
             mediaFields.hintImageUrl = resolved.url ?? question.hintImageUrl;
             if (resolved.storageUri) mediaFields.hintImageStorageUri = resolved.storageUri;
-        }
-
-        if (question.explanationImageUrl) {
-            const resolved = await this.gcsStorage.resolveReadUrl(
-                question.explanationImageUrl,
-            );
-            mediaFields.explanationImageUrl = resolved.url ?? question.explanationImageUrl;
-            if (resolved.storageUri) {
-                mediaFields.explanationImageStorageUri = resolved.storageUri;
-            }
         }
 
         return {
@@ -817,31 +704,37 @@ export class AttemptsService {
     }
 
     private async withAttemptMedia<T extends {
-        attemptedAnswers?: Array<{
-            question?: {
-                imageUrl?: string | null;
-                hintImageUrl?: string | null;
-                explanationImageUrl?: string | null;
-                questionOptions?: Array<{ imageUrl?: string | null }>;
-            } | null;
-            selectedOption?: { imageUrl?: string | null } | null;
-        }>;
+        attemptedAnswers?: StudentAttemptAnswer[];
     }>(attempt: T) {
         if (!attempt.attemptedAnswers) return attempt;
 
         return {
             ...attempt,
-            attemptedAnswers: await Promise.all(
-                attempt.attemptedAnswers.map(async (answer) => ({
-                    ...answer,
+            attemptedAnswers: await Promise.all(attempt.attemptedAnswers.map(
+                async (answer) => ({
+                    id: answer.id,
+                    questionId: answer.questionId,
+                    selectedOptionId: answer.selectedOptionId,
+                    answerType: answer.answerType,
+                    rawValue: answer.rawValue,
+                    normalizedText: answer.normalizedText,
+                    content: answer.content,
+                    numericValue: answer.numericValue,
+                    position: answer.position,
+                    ...(answer.createdAt ? { createdAt: answer.createdAt } : {}),
+                    ...(answer.updatedAt ? { updatedAt: answer.updatedAt } : {}),
                     question: answer.question
-                        ? await this.withQuestionMedia(answer.question)
+                        ? sanitizeStudentQuestion(
+                              await this.withQuestionMedia(answer.question),
+                          )
                         : answer.question,
                     selectedOption: answer.selectedOption
-                        ? await this.withOptionMedia(answer.selectedOption)
+                        ? sanitizeStudentQuestionOption(
+                              await this.withOptionMedia(answer.selectedOption),
+                          )
                         : answer.selectedOption,
-                })),
-            ),
+                }),
+            )),
         };
     }
 
