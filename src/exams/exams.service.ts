@@ -17,7 +17,9 @@ const examInclude = {
       questions: {
         where: { deletedAt: null },
       },
-      examAssignments: true,
+      examAssignments: {
+        where: { deletedAt: null },
+      },
       examAttempts: true,
     },
   },
@@ -58,6 +60,12 @@ export class ExamsService {
       where.status = ExamStatus.PUBLISHED;
       if (!access.isPro) {
         where.accessLevel = AccessLevel.FREE;
+        where.examAssignments = {
+          some: {
+            userId: viewer.userId,
+            deletedAt: null,
+          },
+        };
       }
     }
 
@@ -215,14 +223,24 @@ export class ExamsService {
     };
   }
 
-  private async getStudentExamWhere(id: string, userId: string) {
+  async getStudentExamWhere(id: string, userId: string) {
     const access = await this.getStudentAccess(userId);
 
     return {
       id,
       deletedAt: null,
       status: ExamStatus.PUBLISHED,
-      ...(access.isPro ? {} : { accessLevel: AccessLevel.FREE }),
+      ...(access.isPro
+        ? {}
+        : {
+            accessLevel: AccessLevel.FREE,
+            examAssignments: {
+              some: {
+                userId,
+                deletedAt: null,
+              },
+            },
+          }),
     } satisfies Prisma.ExamWhereInput;
   }
 

@@ -96,13 +96,15 @@ describe('AttemptsService', () => {
     service = new AttemptsService(prisma as PrismaService, gcsStorage);
   });
 
-  it('starts an attempt for a published free exam', async () => {
+  it('starts an attempt for a published free exam with an active assignment', async () => {
     prisma.exam.findUnique.mockResolvedValue({
       id: 'exam-1', status: 'PUBLISHED', title: 'Exam', accessLevel: 'FREE',
     });
     prisma.user.findUnique.mockResolvedValue({ accessLevel: 'FREE', proExpiresAt: null });
-    prisma.exam.findMany.mockResolvedValue([{ id: 'exam-1' }]);
-    prisma.examAssignment.findFirst.mockResolvedValue(null);
+    prisma.examAssignment.findFirst.mockResolvedValue({
+      id: 'assignment-1',
+      dueAt: new Date(Date.now() + 60_000),
+    });
     prisma.examAttempt.findFirst.mockResolvedValue(null);
     prisma.question.count.mockResolvedValue(1);
     prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
@@ -115,10 +117,27 @@ describe('AttemptsService', () => {
 
     expect(prisma.examAttempt.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ userId: 'student-1', examId: 'exam-1', totalQuestions: 1 }),
+        data: expect.objectContaining({
+          userId: 'student-1',
+          examId: 'exam-1',
+          assignmentId: 'assignment-1',
+          totalQuestions: 1,
+        }),
       }),
     );
     expect(result).toEqual(expect.objectContaining({ id: 'attempt-1', questions: [] }));
+  });
+
+  it('rejects an unassigned free exam', async () => {
+    prisma.exam.findUnique.mockResolvedValue({
+      id: 'exam-1', status: 'PUBLISHED', title: 'Exam', accessLevel: 'FREE',
+    });
+    prisma.user.findUnique.mockResolvedValue({ accessLevel: 'FREE', proExpiresAt: null });
+    prisma.examAssignment.findFirst.mockResolvedValue(null);
+
+    await expect(service.start('exam-1', 'student-1', {})).rejects.toMatchObject({
+      response: expect.objectContaining({ code: 'ASSIGNMENT_REQUIRED' }),
+    });
   });
 
   it('includes student identity when listing attempts', async () => {
@@ -294,9 +313,8 @@ describe('AttemptsService', () => {
       id: 'exam-1', status: 'PUBLISHED', title: 'Exam', accessLevel: 'FREE',
     });
     prisma.user.findUnique.mockResolvedValue({ accessLevel: 'FREE', proExpiresAt: null });
-    prisma.exam.findMany.mockResolvedValue([{ id: 'exam-1' }]);
     prisma.examAssignment.findUnique.mockResolvedValue({
-      id: 'assignment-1', userId: 'student-1', examId: 'exam-1',
+      id: 'assignment-1', userId: 'student-1', examId: 'exam-1', deletedAt: null,
       dueAt: new Date(Date.now() + 60_000),
     });
     prisma.examAttempt.findFirst.mockResolvedValue(null);

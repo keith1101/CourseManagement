@@ -845,6 +845,7 @@ async function main() {
             examId: IDS.exams.mathFree,
             assignedAt: DATES.assignmentAssignedAt,
             dueAt: DATES.assignmentDueAt,
+            deletedAt: null,
           },
           {
             id: IDS.assignments.overdueEnglishForFreeStudent,
@@ -852,6 +853,7 @@ async function main() {
             examId: IDS.exams.englishFree,
             assignedAt: DATES.assignmentAssignedAt,
             dueAt: DATES.overdueDueAt,
+            deletedAt: null,
           },
           {
             id: IDS.assignments.scienceForProStudent,
@@ -859,6 +861,7 @@ async function main() {
             examId: IDS.exams.sciencePro,
             assignedAt: DATES.assignmentAssignedAt,
             dueAt: DATES.assignmentDueAt,
+            deletedAt: null,
           },
         ] as const;
 

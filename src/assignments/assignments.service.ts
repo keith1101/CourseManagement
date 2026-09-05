@@ -1,5 +1,13 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    Injectable,
+    NotFoundException,
+} from '@nestjs/common';
 import { AttemptStatus } from '../../generated/client/enums';
+import { AccessLevel, ExamStatus } from '../../generated/client/enums';
+import { Prisma } from '../../generated/client/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AssignmentStatus } from './dto/assignment-status.enum';
 import { AssignmentQueryDto } from './dto/assignment-query.dto';
@@ -43,47 +51,108 @@ export class AssignmentsService {
     constructor(private readonly prisma: PrismaService) {}
 
     async create(createAssignmentDto: CreateAssignmentDto) {
-        const [user, exam] = await Promise.all([
-            this.prisma.user.findUnique({
-                where: { id: createAssignmentDto.userId },
-                select: { id: true },
-            }),
-            this.prisma.exam.findUnique({
-                where: { id: createAssignmentDto.examId, deletedAt: null },
-                select: { id: true },
-            }),
-        ]);
-
-        if (!user) {
-            throw new NotFoundException('User not found');
-        }
-
-        if (!exam) {
-            throw new NotFoundException('Exam not found');
-        }
-
         const dueAt = new Date(createAssignmentDto.dueAt);
         if (dueAt.getTime() <= Date.now()) {
             throw new BadRequestException('Due date must be in the future');
         }
 
-        const existing = await this.prisma.examAssignment.findFirst({
-            where: {
-                userId: createAssignmentDto.userId,
-                examId: createAssignmentDto.examId,
-            },
-            select: { id: true },
-        });
-        if (existing) throw new ConflictException('Assignment already exists for this student and exam');
+        const assignment = await this.prisma.$transaction(
+            async (transaction) => {
+                const [user, exam] = await Promise.all([
+                    transaction.user.findUnique({
+                        where: { id: createAssignmentDto.userId },
+                        select: {
+                            id: true,
+                            accessLevel: true,
+                            proExpiresAt: true,
+                            isActive: true,
+                        },
+                    }),
+                    transaction.exam.findUnique({
+                        where: { id: createAssignmentDto.examId },
+                        select: {
+                            id: true,
+                            status: true,
+                            accessLevel: true,
+                            deletedAt: true,
+                        },
+                    }),
+                ]);
 
-        const assignment = await this.prisma.examAssignment.create({
-            data: {
-                userId: createAssignmentDto.userId,
-                examId: createAssignmentDto.examId,
-                dueAt,
+                if (!user) {
+                    throw new NotFoundException('User not found');
+                }
+
+                if (user.isActive === false) {
+                    throw new ForbiddenException('User account is locked');
+                }
+
+                if (!exam || exam.deletedAt || exam.status !== ExamStatus.PUBLISHED) {
+                    throw new NotFoundException('Published exam not found');
+                }
+
+                const isPro =
+                    user.accessLevel === AccessLevel.PRO &&
+                    (!user.proExpiresAt || user.proExpiresAt.getTime() > Date.now());
+
+                if (!isPro && exam.accessLevel !== AccessLevel.FREE) {
+                    throw new ForbiddenException(
+                        'Tài khoản miễn phí chỉ được nhận đề thi FREE.',
+                    );
+                }
+
+                const existing = await transaction.examAssignment.findFirst({
+                    where: {
+                        userId: createAssignmentDto.userId,
+                        examId: createAssignmentDto.examId,
+                        deletedAt: null,
+                    },
+                    select: { id: true },
+                });
+                if (existing) {
+                    throw new ConflictException(
+                        'Assignment already exists for this student and exam',
+                    );
+                }
+
+                if (!isPro) {
+                    const activeFreeAssignments =
+                        await transaction.examAssignment.findMany({
+                            where: {
+                                userId: createAssignmentDto.userId,
+                                deletedAt: null,
+                                exam: {
+                                    is: {
+                                        deletedAt: null,
+                                        status: ExamStatus.PUBLISHED,
+                                        accessLevel: AccessLevel.FREE,
+                                    },
+                                },
+                            },
+                            distinct: ['examId'],
+                            select: { examId: true },
+                        });
+
+                    if (activeFreeAssignments.length >= 2) {
+                        throw new ConflictException({
+                            code: 'FREE_EXAM_LIMIT_REACHED',
+                            message:
+                                'Tài khoản miễn phí chỉ được nhận tối đa 2 đề thi đang hoạt động.',
+                        });
+                    }
+                }
+
+                return transaction.examAssignment.create({
+                    data: {
+                        userId: createAssignmentDto.userId,
+                        examId: createAssignmentDto.examId,
+                        dueAt,
+                    },
+                    include: assignmentInclude,
+                });
             },
-            include: assignmentInclude,
-        });
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        );
 
         return this.withStatus(assignment);
     }
@@ -91,8 +160,9 @@ export class AssignmentsService {
     async findAll(query: AssignmentQueryDto, userId?: string) {
         const assignments = await this.prisma.examAssignment.findMany({
             where: {
+                deletedAt: null,
                 userId: userId ?? query.userId,
-                exam: { is: { deletedAt: null } },
+                exam: { is: { deletedAt: null, status: ExamStatus.PUBLISHED } },
             },
             include: assignmentInclude,
             orderBy: {
@@ -117,7 +187,8 @@ export class AssignmentsService {
         const assignment = await this.prisma.examAssignment.findUnique({
             where: {
                 id,
-                exam: { is: { deletedAt: null } },
+                deletedAt: null,
+                exam: { is: { deletedAt: null, status: ExamStatus.PUBLISHED } },
             },
             include: assignmentInclude,
         });
@@ -150,8 +221,9 @@ export class AssignmentsService {
     async remove(id: string) {
         await this.findOne(id);
 
-        return this.prisma.examAssignment.delete({
+        return this.prisma.examAssignment.update({
             where: { id },
+            data: { deletedAt: new Date() },
         });
     }
 

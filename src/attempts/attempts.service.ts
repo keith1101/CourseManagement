@@ -173,35 +173,17 @@ export class AttemptsService {
             (!user.proExpiresAt || user.proExpiresAt.getTime() > Date.now());
 
         if (exam.accessLevel === 'PRO' && !isPro) {
-            throw new ForbiddenException(
-                'Tài khoản miễn phí không thể làm đề thi PRO. Vui lòng nâng cấp qua Zalo!',
-            );
-        }
-
-        // BR-02: Free user is limited to the first 2 published exams
-        if (!isPro) {
-            const firstTwoExams = await this.prisma.exam.findMany({
-                where: { status: 'PUBLISHED', deletedAt: null },
-                orderBy: [
-                    { displayOrder: 'asc' },
-                    { createdAt: 'asc' },
-                ],
-                take: 2,
-                select: { id: true },
+            throw new ForbiddenException({
+                code: 'EXAM_REQUIRES_PRO',
+                message: 'Tài khoản miễn phí không thể làm đề thi PRO. Vui lòng nâng cấp qua Zalo!',
             });
-            const allowedIds = firstTwoExams.map((e) => e.id);
-            if (!allowedIds.includes(examId)) {
-                throw new ForbiddenException(
-                    'Tài khoản miễn phí chỉ được làm 2 đề đầu tiên. Vui lòng nâng cấp Pro để mở khóa toàn bộ!',
-                );
-            }
         }
 
         let assignmentId = startAttemptDto.assignmentId;
 
         if (assignmentId) {
             const assignment = await this.prisma.examAssignment.findUnique({
-                where: { id: assignmentId },
+                where: { id: assignmentId, deletedAt: null },
                 select: {
                     id: true,
                     userId: true,
@@ -210,11 +192,7 @@ export class AttemptsService {
                 },
             });
 
-            if (
-                !assignment ||
-                assignment.userId !== userId ||
-                assignment.examId !== examId
-            ) {
+            if (!assignment || assignment.userId !== userId || assignment.examId !== examId) {
                 throw new NotFoundException('Assignment not found');
             }
 
@@ -226,6 +204,7 @@ export class AttemptsService {
                 where: {
                     userId,
                     examId,
+                    deletedAt: null,
                 },
                 orderBy: { dueAt: 'asc' },
                 select: { id: true, dueAt: true },
@@ -237,6 +216,11 @@ export class AttemptsService {
                 }
 
                 assignmentId = assignment.id;
+            } else if (!isPro) {
+                throw new ForbiddenException({
+                    code: 'ASSIGNMENT_REQUIRED',
+                    message: 'Tài khoản miễn phí chỉ được làm đề thi đã được giao.',
+                });
             }
         }
 

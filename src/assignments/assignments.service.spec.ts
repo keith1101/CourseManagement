@@ -34,14 +34,26 @@ describe('AssignmentsService', () => {
         update: jest.fn(),
         delete: jest.fn(),
       },
+      $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     service = new AssignmentsService(prisma as PrismaService);
   });
 
   it('creates a future assignment and reports PENDING status', async () => {
-    prisma.user.findUnique.mockResolvedValue({ id: 'student-1' });
-    prisma.exam.findUnique.mockResolvedValue({ id: 'exam-1' });
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'student-1',
+      accessLevel: 'FREE',
+      proExpiresAt: null,
+      isActive: true,
+    });
+    prisma.exam.findUnique.mockResolvedValue({
+      id: 'exam-1',
+      status: 'PUBLISHED',
+      accessLevel: 'FREE',
+      deletedAt: null,
+    });
     prisma.examAssignment.findFirst.mockResolvedValue(null);
+    prisma.examAssignment.findMany.mockResolvedValue([]);
     prisma.examAssignment.create.mockResolvedValue(assignment);
 
     await expect(
@@ -56,7 +68,18 @@ describe('AssignmentsService', () => {
       service.create({ userId: 'missing', examId: 'exam-1', dueAt: dueAt.toISOString() }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
-    prisma.user.findUnique.mockResolvedValue({ id: 'student-1' });
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'student-1',
+      accessLevel: 'FREE',
+      proExpiresAt: null,
+      isActive: true,
+    });
+    prisma.exam.findUnique.mockResolvedValue({
+      id: 'exam-1',
+      status: 'PUBLISHED',
+      accessLevel: 'FREE',
+      deletedAt: null,
+    });
     await expect(
       service.create({ userId: 'student-1', examId: 'exam-1', dueAt: new Date(Date.now() - 1000).toISOString() }),
     ).rejects.toBeInstanceOf(BadRequestException);
@@ -77,7 +100,11 @@ describe('AssignmentsService', () => {
     const result = await service.findAll({ status: AssignmentStatus.COMPLETED }, 'student-1');
     expect(prisma.examAssignment.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ userId: 'student-1' }),
+        where: expect.objectContaining({
+          userId: 'student-1',
+          deletedAt: null,
+          exam: { is: { deletedAt: null, status: 'PUBLISHED' } },
+        }),
       }),
     );
     expect(result).toHaveLength(1);
@@ -95,11 +122,45 @@ describe('AssignmentsService', () => {
   it('updates and removes an assignment after checking it exists', async () => {
     prisma.examAssignment.findUnique.mockResolvedValue(assignment);
     prisma.examAssignment.update.mockResolvedValue(assignment);
-    prisma.examAssignment.delete.mockResolvedValue(assignment);
+    prisma.examAssignment.update.mockResolvedValue(assignment);
 
     await service.update('assignment-1', { dueAt: dueAt.toISOString() });
     await service.remove('assignment-1');
     expect(prisma.examAssignment.update).toHaveBeenCalled();
-    expect(prisma.examAssignment.delete).toHaveBeenCalledWith({ where: { id: 'assignment-1' } });
+    expect(prisma.examAssignment.update).toHaveBeenCalledWith({
+      where: { id: 'assignment-1' },
+      data: { deletedAt: expect.any(Date) },
+    });
+  });
+
+  it('rejects a third active free exam but allows a replacement after revocation', async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'student-1',
+      accessLevel: 'FREE',
+      proExpiresAt: null,
+      isActive: true,
+    });
+    prisma.exam.findUnique.mockResolvedValue({
+      id: 'exam-3',
+      status: 'PUBLISHED',
+      accessLevel: 'FREE',
+      deletedAt: null,
+    });
+    prisma.examAssignment.findFirst.mockResolvedValue(null);
+    prisma.examAssignment.findMany.mockResolvedValue([
+      { examId: 'exam-1' },
+      { examId: 'exam-2' },
+    ]);
+
+    await expect(
+      service.create({ userId: 'student-1', examId: 'exam-3', dueAt: dueAt.toISOString() }),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    prisma.examAssignment.findMany.mockResolvedValue([{ examId: 'exam-2' }]);
+    prisma.examAssignment.create.mockResolvedValue({ ...assignment, examId: 'exam-3' });
+
+    await expect(
+      service.create({ userId: 'student-1', examId: 'exam-3', dueAt: dueAt.toISOString() }),
+    ).resolves.toEqual(expect.objectContaining({ examId: 'exam-3' }));
   });
 });

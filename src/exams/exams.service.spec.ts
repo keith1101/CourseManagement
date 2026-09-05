@@ -100,6 +100,12 @@ describe('ExamsService', () => {
       status: ExamStatus.PUBLISHED,
       accessLevel: AccessLevel.FREE,
       deletedAt: null,
+      examAssignments: {
+        some: {
+          userId: 'student-1',
+          deletedAt: null,
+        },
+      },
     });
   });
 
@@ -135,6 +141,12 @@ describe('ExamsService', () => {
       status: ExamStatus.PUBLISHED,
       accessLevel: AccessLevel.FREE,
       deletedAt: null,
+      examAssignments: {
+        some: {
+          userId: 'student-1',
+          deletedAt: null,
+        },
+      },
     });
   });
 
@@ -155,6 +167,12 @@ describe('ExamsService', () => {
         status: ExamStatus.PUBLISHED,
         accessLevel: AccessLevel.FREE,
         deletedAt: null,
+        examAssignments: {
+          some: {
+            userId: 'student-1',
+            deletedAt: null,
+          },
+        },
       },
       select: { id: true },
     });

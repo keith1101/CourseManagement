@@ -193,7 +193,11 @@ model ExamAssignment {
   dueAt        DateTime
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
   examAttempts ExamAttempt[]
+
+  @@index([userId, deletedAt])
+  @@index([examId, deletedAt])
 }
 
 model ExamAttempt {
