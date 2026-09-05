@@ -23,11 +23,12 @@ export class ExamQuestionsController {
     @Get()
     findByExam(
         @Param('examId') examId: string,
-        @Request() request: { user: { role: UserRole } },
+        @Request() request: { user: { sub: string; role: UserRole } },
     ) {
         return this.questionsService.findByExam(
             examId,
             request.user.role === UserRole.ADMIN,
+            request.user.role === UserRole.STUDENT ? request.user.sub : undefined,
         );
     }
 

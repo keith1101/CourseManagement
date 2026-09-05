@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ForbiddenException,
     Injectable,
     NotFoundException,
 } from '@nestjs/common';
@@ -13,6 +14,11 @@ import {
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
 import { CreateQuestionOptionDto, UpdateQuestionOptionDto } from './dto/question-option.dto';
+import {
+    sanitizeStudentQuestion,
+    studentQuestionSelect,
+} from './question-response';
+import { ExamsService } from '../exams/exams.service';
 
 const questionInclude = {
     questionOptions: {
@@ -21,20 +27,6 @@ const questionInclude = {
         },
     },
     questionAcceptedAnswers: {
-        orderBy: {
-            position: 'asc' as const,
-        },
-    },
-} as const;
-
-const publicQuestionInclude = {
-    questionOptions: {
-        select: {
-            id: true,
-            contentText: true,
-            imageUrl: true,
-            position: true,
-        },
         orderBy: {
             position: 'asc' as const,
         },
@@ -51,6 +43,7 @@ export class QuestionsService {
     constructor(
         private readonly prismaService: PrismaService,
         private readonly gcsStorage: GcsStorageService,
+        private readonly examsService: ExamsService,
     ) {}
 
     async uploadImage(file: StorageUploadFile) {
@@ -153,14 +146,40 @@ export class QuestionsService {
         );
     }
 
-    async findByExam(examId: string, includeAnswers = false) {
-        const exam = await this.prismaService.exam.findUnique({
-            where: { id: examId, deletedAt: null },
-            select: { id: true },
-        });
+    async findByExam(examId: string, includeAnswers = false, userId?: string) {
+        if (includeAnswers) {
+            const exam = await this.prismaService.exam.findUnique({
+                where: { id: examId, deletedAt: null },
+                select: { id: true },
+            });
 
-        if (!exam) {
-            throw new NotFoundException('Exam not found');
+            if (!exam) {
+                throw new NotFoundException('Exam not found');
+            }
+        } else {
+            if (!userId) {
+                throw new ForbiddenException('Authenticated student context is required');
+            }
+
+            await this.examsService.assertStudentCanAccessExam(examId, userId);
+        }
+
+        if (includeAnswers) {
+            const questions = await this.prismaService.question.findMany({
+                where: {
+                    examId,
+                    deletedAt: null,
+                    exam: { is: { deletedAt: null } },
+                },
+                include: questionInclude,
+                orderBy: {
+                    position: 'asc',
+                },
+            });
+
+            return Promise.all(
+                questions.map((question) => this.withQuestionMedia(question)),
+            );
         }
 
         const questions = await this.prismaService.question.findMany({
@@ -169,34 +188,58 @@ export class QuestionsService {
                 deletedAt: null,
                 exam: { is: { deletedAt: null } },
             },
-            include: includeAnswers ? questionInclude : publicQuestionInclude,
+            select: studentQuestionSelect,
             orderBy: {
                 position: 'asc',
             },
         });
 
-        return Promise.all(questions.map((question) => this.withQuestionMedia(question)));
+        const decoratedQuestions = await Promise.all(
+            questions.map((question) => this.withQuestionMedia(question)),
+        );
+
+        return decoratedQuestions.map((question) =>
+            sanitizeStudentQuestion(question),
+        );
     }
 
     async find(id: string, includeAnswers = false) {
+        if (includeAnswers) {
+            const question = await this.prismaService.question.findFirst({
+                where: {
+                    id,
+                    deletedAt: null,
+                    exam: { is: { deletedAt: null } },
+                },
+                include: questionInclude,
+            });
+
+            if (!question) {
+                throw new NotFoundException('Question not found');
+            }
+
+            return this.withQuestionMedia(question);
+        }
+
         const question = await this.prismaService.question.findFirst({
             where: {
                 id,
                 deletedAt: null,
                 exam: { is: { deletedAt: null } },
             },
-            include: includeAnswers ? questionInclude : publicQuestionInclude,
+            select: studentQuestionSelect,
         });
 
         if (!question) {
             throw new NotFoundException('Question not found');
         }
 
-        return this.withQuestionMedia(question);
+        const decoratedQuestion = await this.withQuestionMedia(question);
+        return sanitizeStudentQuestion(decoratedQuestion);
     }
 
     async update(id: string, updateQuestionsDto: UpdateQuestionsDto) {
-        const existing = await this.find(id, true);
+        const existing = (await this.find(id, true)) as any;
 
         if (updateQuestionsDto.subjectId !== undefined) {
             await this.ensureActiveSubject(updateQuestionsDto.subjectId);
@@ -371,7 +414,7 @@ export class QuestionsService {
 
     // QuestionOption sub-resource methods
     async createOption(questionId: string, dto: CreateQuestionOptionDto) {
-        const question = await this.find(questionId, true);
+        const question = (await this.find(questionId, true)) as any;
 
         this.validateImageReference(dto.imageUrl);
 

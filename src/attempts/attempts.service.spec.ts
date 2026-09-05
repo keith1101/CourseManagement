@@ -11,6 +11,59 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { AttemptsService } from './attempts.service';
 
+const FORBIDDEN_STUDENT_KEYS = new Set([
+  'correctTextAnswer',
+  'questionAcceptedAnswers',
+  'acceptedAnswers',
+  'isCorrect',
+  'correctOptionId',
+  'correctOptionIds',
+  'correctAnswer',
+  'correctAnswers',
+  'answerKey',
+  'gradingKey',
+  'explaination',
+  'explanation',
+  'explanationImageUrl',
+  'explanationImageStorageUri',
+]);
+
+function forbiddenStudentKeys(value: unknown, path = 'root'): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => forbiddenStudentKeys(item, `${path}[${index}]`));
+  }
+  if (!value || typeof value !== 'object') return [];
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => [
+    ...(FORBIDDEN_STUDENT_KEYS.has(key) ? [`${path}.${key}`] : []),
+    ...forbiddenStudentKeys(nestedValue, `${path}.${key}`),
+  ]);
+}
+
+const questionWithAnswerData = {
+  id: 'question-1',
+  examId: 'exam-1',
+  subjectId: 'subject-1',
+  questionType: QuestionType.MULTIPLE_CHOICE,
+  contentText: 'Question',
+  imageUrl: null,
+  hintImageUrl: null,
+  hint: 'A safe hint',
+  instruction: null,
+  timeLimitSeconds: 30,
+  position: 0,
+  correctTextAnswer: 'Paris',
+  explaination: 'The answer is Paris',
+  explanationImageUrl: 'gs://bucket/explanation.png',
+  questionOptions: [
+    { id: 'correct-option', contentText: 'A', imageUrl: null, isCorrect: true, position: 0 },
+    { id: 'wrong-option', contentText: 'B', imageUrl: null, isCorrect: false, position: 1 },
+  ],
+  questionAcceptedAnswers: [
+    { id: 'accepted-1', rawValue: 'Paris', answerType: AnswerValueType.TEXT, isCorrect: true, position: 0 },
+  ],
+};
+
 describe('AttemptsService', () => {
   let service: AttemptsService;
   let prisma: any;
@@ -114,7 +167,7 @@ describe('AttemptsService', () => {
       data: expect.objectContaining({ selectedOptionId: null, answerType: AnswerValueType.TEXT }),
     });
     expect(result.selectedOptionId).toBeNull();
-    expect(result.isCorrect).toBe(true);
+    expect(result).not.toHaveProperty('isCorrect');
   });
 
   it('saves a multiple-choice draft without grading or revealing the answer key', async () => {
@@ -148,9 +201,9 @@ describe('AttemptsService', () => {
         isCorrect: false,
       }),
     });
-    expect(result.isCorrect).toBeUndefined();
-    expect(result.correctOptionId).toBeUndefined();
-    expect(result.explanation).toBeUndefined();
+    expect(result).not.toHaveProperty('isCorrect');
+    expect(result).not.toHaveProperty('correctOptionId');
+    expect(result).not.toHaveProperty('explanation');
     expect(gcsStorage.resolveReadUrl).not.toHaveBeenCalled();
   });
 
@@ -197,6 +250,112 @@ describe('AttemptsService', () => {
     });
     expect(result.selectedOptionId).toBeNull();
     expect(result.timedOut).toBe(true);
+  });
+
+  it('does not expose answer keys while loading an in-progress attempt', async () => {
+    prisma.examAttempt.findUnique
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+        exam: { deletedAt: null },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', assignmentId: 'assignment-1',
+        status: AttemptStatus.IN_PROGRESS, submittedAt: null, correctCount: 0, totalQuestions: 1,
+        startedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+        user: { id: 'student-1', fullName: 'Student', email: 'student@example.com' },
+        exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
+        assignment: { id: 'assignment-1', assignedAt: new Date(), dueAt: new Date(Date.now() + 60_000) },
+        attemptedAnswers: [{
+          id: 'answer-1', attemptId: 'attempt-1', questionId: 'question-1',
+          selectedOptionId: 'correct-option', answerType: AnswerValueType.TEXT,
+          rawValue: 'A', normalizedText: 'a', content: null, numericValue: null,
+          position: 0, isCorrect: true,
+          question: questionWithAnswerData,
+          selectedOption: { id: 'correct-option', contentText: 'A', imageUrl: null, position: 0, isCorrect: true },
+        }],
+      });
+
+    const result = await service.findOne('attempt-1', 'student-1');
+
+    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(result).toEqual(expect.objectContaining({
+      status: AttemptStatus.IN_PROGRESS,
+      attemptedAnswers: [expect.objectContaining({
+        selectedOptionId: 'correct-option',
+        question: expect.objectContaining({ questionType: QuestionType.MULTIPLE_CHOICE }),
+      })],
+    }));
+    expect(prisma.examAttempt.findUnique.mock.calls[1][0].select.attemptedAnswers.select)
+      .not.toHaveProperty('isCorrect');
+  });
+
+  it('keeps assignment-started attempt questions free of answer keys', async () => {
+    prisma.exam.findUnique.mockResolvedValue({
+      id: 'exam-1', status: 'PUBLISHED', title: 'Exam', accessLevel: 'FREE',
+    });
+    prisma.user.findUnique.mockResolvedValue({ accessLevel: 'FREE', proExpiresAt: null });
+    prisma.exam.findMany.mockResolvedValue([{ id: 'exam-1' }]);
+    prisma.examAssignment.findUnique.mockResolvedValue({
+      id: 'assignment-1', userId: 'student-1', examId: 'exam-1',
+      dueAt: new Date(Date.now() + 60_000),
+    });
+    prisma.examAttempt.findFirst.mockResolvedValue(null);
+    prisma.question.count.mockResolvedValue(1);
+    prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    prisma.examAttempt.findUnique
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+        exam: { deletedAt: null },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', assignmentId: 'assignment-1',
+        status: AttemptStatus.IN_PROGRESS, submittedAt: null, correctCount: 0, totalQuestions: 1,
+        startedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
+        user: { id: 'student-1', fullName: 'Student', email: 'student@example.com' },
+        exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
+        assignment: { id: 'assignment-1', assignedAt: new Date(), dueAt: new Date(Date.now() + 60_000) },
+        attemptedAnswers: [],
+      });
+    prisma.question.findMany.mockResolvedValue([questionWithAnswerData]);
+
+    const result = await service.start('exam-1', 'student-1', { assignmentId: 'assignment-1' });
+
+    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(result.questions).toHaveLength(1);
+  });
+
+  it('uses least disclosure for completed results', async () => {
+    prisma.examAttempt.findUnique
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.COMPLETED,
+        exam: { deletedAt: null },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.COMPLETED,
+        submittedAt: new Date(), correctCount: 1, totalQuestions: 1,
+        exam: { id: 'exam-1', title: 'Exam' },
+        attemptedAnswers: [{
+          id: 'answer-1', attemptId: 'attempt-1', questionId: 'question-1',
+          selectedOptionId: 'correct-option', answerType: AnswerValueType.TEXT,
+          rawValue: 'A', normalizedText: 'a', content: null, numericValue: null,
+          position: 0, isCorrect: true,
+          question: questionWithAnswerData,
+          selectedOption: { id: 'correct-option', contentText: 'A', imageUrl: null, position: 0, isCorrect: true },
+        }],
+      });
+    prisma.question.findMany.mockResolvedValue([questionWithAnswerData]);
+
+    const result = await service.getResult('attempt-1', 'student-1');
+
+    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(result).toEqual(expect.objectContaining({
+      correctCount: 1,
+      totalQuestions: 1,
+      percentage: 100,
+    }));
+    expect(prisma.examAttempt.findUnique.mock.calls[1][0].select.attemptedAnswers.select)
+      .not.toHaveProperty('isCorrect');
+    expect(prisma.question.findMany.mock.calls[0][0].select).toBeDefined();
   });
 
   it('enforces attempt ownership', async () => {
