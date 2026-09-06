@@ -28,15 +28,30 @@ const FORBIDDEN_STUDENT_KEYS = new Set([
   'explanationImageStorageUri',
 ]);
 
-function forbiddenStudentKeys(value: unknown, path = 'root'): string[] {
+function forbiddenStudentKeys(
+  value: unknown,
+  path = 'root',
+  allowCompletedResultCorrectness = false,
+): string[] {
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) => forbiddenStudentKeys(item, `${path}[${index}]`));
+    return value.flatMap((item, index) => forbiddenStudentKeys(
+      item,
+      `${path}[${index}]`,
+      allowCompletedResultCorrectness,
+    ));
   }
   if (!value || typeof value !== 'object') return [];
 
   return Object.entries(value).flatMap(([key, nestedValue]) => [
-    ...(FORBIDDEN_STUDENT_KEYS.has(key) ? [`${path}.${key}`] : []),
-    ...forbiddenStudentKeys(nestedValue, `${path}.${key}`),
+    ...(FORBIDDEN_STUDENT_KEYS.has(key)
+      && !(
+        allowCompletedResultCorrectness
+        && key === 'isCorrect'
+        && /^root\.attemptedAnswers\[\d+\]\.isCorrect$/.test(`${path}.${key}`)
+      )
+      ? [`${path}.${key}`]
+      : []),
+    ...forbiddenStudentKeys(nestedValue, `${path}.${key}`, allowCompletedResultCorrectness),
   ]);
 }
 
@@ -63,6 +78,38 @@ const questionWithAnswerData = {
     { id: 'accepted-1', rawValue: 'Paris', answerType: AnswerValueType.TEXT, isCorrect: true, position: 0 },
   ],
 };
+
+function makeCompletedAttemptAnswer({
+  id,
+  questionId = 'question-1',
+  answerType = AnswerValueType.TEXT,
+  selectedOptionId = null,
+  rawValue = 'answer',
+  numericValue = null,
+  isCorrect,
+}: {
+  id: string;
+  questionId?: string;
+  answerType?: AnswerValueType;
+  selectedOptionId?: string | null;
+  rawValue?: string;
+  numericValue?: number | null;
+  isCorrect: boolean;
+}) {
+  return {
+    id,
+    attemptId: 'attempt-1',
+    questionId,
+    selectedOptionId,
+    answerType,
+    rawValue,
+    normalizedText: rawValue.toLocaleLowerCase(),
+    content: null,
+    numericValue,
+    position: Number(id.replace(/\D/g, '')) || 0,
+    isCorrect,
+  };
+}
 
 describe('AttemptsService', () => {
   let service: AttemptsService;
@@ -95,6 +142,33 @@ describe('AttemptsService', () => {
     };
     service = new AttemptsService(prisma as PrismaService, gcsStorage);
   });
+
+  const arrangeCompletedResult = (
+    attemptedAnswers: unknown[],
+    correctCount: number,
+  ) => {
+    prisma.examAttempt.findUnique
+      .mockResolvedValueOnce({
+        id: 'attempt-1',
+        userId: 'student-1',
+        examId: 'exam-1',
+        status: AttemptStatus.COMPLETED,
+        exam: { deletedAt: null },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1',
+        userId: 'student-1',
+        examId: 'exam-1',
+        status: AttemptStatus.COMPLETED,
+        submittedAt: new Date(),
+        correctCount,
+        totalQuestions: attemptedAnswers.length,
+        exam: { id: 'exam-1', title: 'Exam' },
+        attemptedAnswers,
+      });
+
+    prisma.question.findMany.mockResolvedValue([]);
+  };
 
   it('starts an attempt for a published free exam with an active assignment', async () => {
     prisma.exam.findUnique.mockResolvedValue({
@@ -365,15 +439,130 @@ describe('AttemptsService', () => {
 
     const result = await service.getResult('attempt-1', 'student-1');
 
-    expect(forbiddenStudentKeys(result)).toEqual([]);
+    expect(forbiddenStudentKeys(result, 'root', true)).toEqual([]);
     expect(result).toEqual(expect.objectContaining({
       correctCount: 1,
       totalQuestions: 1,
       percentage: 100,
+      attemptedAnswers: [expect.objectContaining({ isCorrect: true })],
     }));
     expect(prisma.examAttempt.findUnique.mock.calls[1][0].select.attemptedAnswers.select)
-      .not.toHaveProperty('isCorrect');
+      .toHaveProperty('isCorrect', true);
     expect(prisma.question.findMany.mock.calls[0][0].select).toBeDefined();
+  });
+
+  it.each([
+    [
+      'multiple-choice correct',
+      makeCompletedAttemptAnswer({
+        id: 'answer-1', answerType: AnswerValueType.TEXT,
+        selectedOptionId: 'correct-option', isCorrect: true,
+      }),
+      1,
+      true,
+    ],
+    [
+      'multiple-choice incorrect',
+      makeCompletedAttemptAnswer({
+        id: 'answer-1', answerType: AnswerValueType.TEXT,
+        selectedOptionId: 'wrong-option', isCorrect: false,
+      }),
+      0,
+      false,
+    ],
+    [
+      'short answer correct',
+      makeCompletedAttemptAnswer({
+        id: 'answer-1', answerType: AnswerValueType.TEXT,
+        rawValue: 'Paris', isCorrect: true,
+      }),
+      1,
+      true,
+    ],
+    [
+      'short answer incorrect',
+      makeCompletedAttemptAnswer({
+        id: 'answer-1', answerType: AnswerValueType.TEXT,
+        rawValue: 'London', isCorrect: false,
+      }),
+      0,
+      false,
+    ],
+    [
+      'numeric answer correct',
+      makeCompletedAttemptAnswer({
+        id: 'answer-1', answerType: AnswerValueType.NUMBER,
+        rawValue: '100', numericValue: 100, isCorrect: true,
+      }),
+      1,
+      true,
+    ],
+    [
+      'numeric answer incorrect',
+      makeCompletedAttemptAnswer({
+        id: 'answer-1', answerType: AnswerValueType.NUMBER,
+        rawValue: '99', numericValue: 99, isCorrect: false,
+      }),
+      0,
+      false,
+    ],
+  ])('returns stored correctness for a completed %s', async (
+    _label,
+    answer,
+    correctCount,
+    expectedIsCorrect,
+  ) => {
+    arrangeCompletedResult([answer], correctCount as number);
+
+    const result = await service.getResult('attempt-1', 'student-1');
+
+    expect(result.attemptedAnswers).toEqual([
+      expect.objectContaining({ isCorrect: expectedIsCorrect }),
+    ]);
+    const attemptedAnswers = result.attemptedAnswers as Array<{ isCorrect: boolean }>;
+    expect(attemptedAnswers.filter((item) => item.isCorrect).length)
+      .toBe(result.correctCount);
+    expect(forbiddenStudentKeys(result, 'root', true)).toEqual([]);
+  });
+
+  it.each([
+    ['two answers correct', [true, true], 2],
+    ['one answer correct', [true, false], 1],
+    ['no answers correct', [false, false], 0],
+  ])('keeps aggregate and per-answer results consistent when %s', async (
+    _label,
+    correctness,
+    correctCount,
+  ) => {
+    const answers = (correctness as boolean[]).map((isCorrect, index) =>
+      makeCompletedAttemptAnswer({
+        id: `answer-${index + 1}`,
+        questionId: `question-${index + 1}`,
+        isCorrect,
+      }),
+    );
+    arrangeCompletedResult(answers, correctCount as number);
+
+    const result = await service.getResult('attempt-1', 'student-1');
+    const returnedAnswers = result.attemptedAnswers as Array<{ isCorrect: boolean }>;
+    const perAnswerCorrectCount = returnedAnswers.filter(
+      (answer) => answer.isCorrect,
+    ).length;
+
+    expect(result.correctCount).toBe(correctCount);
+    expect(returnedAnswers.map((answer) => answer.isCorrect))
+      .toEqual(correctness);
+    expect(perAnswerCorrectCount).toBe(correctCount);
+  });
+
+  it('rejects a completed result with inconsistent persisted scoring', async () => {
+    arrangeCompletedResult([
+      makeCompletedAttemptAnswer({ id: 'answer-1', isCorrect: true }),
+    ], 0);
+
+    await expect(service.getResult('attempt-1', 'student-1')).rejects.toThrow(
+      'Attempt result is inconsistent',
+    );
   });
 
   it('enforces attempt ownership', async () => {

@@ -48,6 +48,11 @@ const studentAttemptAnswerSelect = {
     },
 } as const;
 
+const studentResultAttemptAnswerSelect = {
+    ...studentAttemptAnswerSelect,
+    isCorrect: true,
+} as const;
+
 // Completed student results retain aggregate scoring and submitted values,
 // but follow the least-disclosure policy for answer keys and explanations.
 const studentResultSelect = {
@@ -65,7 +70,7 @@ const studentResultSelect = {
         },
     },
     attemptedAnswers: {
-        select: studentAttemptAnswerSelect,
+        select: studentResultAttemptAnswerSelect,
         orderBy: {
             position: 'asc' as const,
         },
@@ -81,6 +86,7 @@ type StudentAttemptAnswer = {
     normalizedText: string | null;
     content: string | null;
     numericValue: number | null;
+    isCorrect?: boolean;
     position: number;
     createdAt?: Date;
     updatedAt?: Date;
@@ -571,9 +577,16 @@ export class AttemptsService {
         });
 
         const [decoratedResult, decoratedQuestions] = await Promise.all([
-            this.withAttemptMedia(result),
+            this.withAttemptMedia(result, true),
             Promise.all(questions.map((question) => this.withQuestionMedia(question))),
         ]);
+
+        const persistedCorrectCount = decoratedResult.attemptedAnswers?.filter(
+            (answer) => answer.isCorrect === true,
+        ).length ?? 0;
+        if (persistedCorrectCount !== result.correctCount) {
+            throw new ConflictException('Attempt result is inconsistent');
+        }
 
         return {
             ...decoratedResult,
@@ -689,7 +702,7 @@ export class AttemptsService {
 
     private async withAttemptMedia<T extends {
         attemptedAnswers?: StudentAttemptAnswer[];
-    }>(attempt: T) {
+    }>(attempt: T, includeCorrectness = false) {
         if (!attempt.attemptedAnswers) return attempt;
 
         return {
@@ -704,6 +717,7 @@ export class AttemptsService {
                     normalizedText: answer.normalizedText,
                     content: answer.content,
                     numericValue: answer.numericValue,
+                    ...(includeCorrectness ? { isCorrect: answer.isCorrect === true } : {}),
                     position: answer.position,
                     ...(answer.createdAt ? { createdAt: answer.createdAt } : {}),
                     ...(answer.updatedAt ? { updatedAt: answer.updatedAt } : {}),
