@@ -46,23 +46,28 @@ enum AttemptStatus {
 }
 
 model User {
-  id              String           @id @default(uuid())
-  fullName        String
-  email           String           @unique
-  phone           String?
-  dateOfBirth     DateTime?
-  passwordHash    String
-  tokenVersion    Int              @default(0)
-  role            UserRole         @default(STUDENT)
-  isActive        Boolean          @default(true)
-  accessLevel     AccessLevel      @default(FREE)
-  lastLoginAt     DateTime?
-  proExpiresAt    DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  subscriptions   Subscription[]
-  examAssignments ExamAssignment[]
-  examAttempts    ExamAttempt[]
+  id                               String                   @id @default(uuid())
+  fullName                         String
+  email                            String                   @unique
+  phone                            String?
+  dateOfBirth                      DateTime?
+  passwordHash                     String
+  tokenVersion                     Int                      @default(0)
+  role                             UserRole                 @default(STUDENT)
+  isActive                         Boolean                  @default(true)
+  accessLevel                      AccessLevel              @default(FREE)
+  lastLoginAt                      DateTime?
+  proExpiresAt                     DateTime?
+  createdAt                        DateTime                 @default(now())
+  updatedAt                        DateTime                 @updatedAt
+  emailVerifiedAt                  DateTime?
+  verificationEmailLastRequestedAt DateTime?
+  verificationEmailWindowStartedAt DateTime?
+  verificationEmailRequestCount    Int                      @default(0)
+  subscriptions                    Subscription[]
+  examAssignments                  ExamAssignment[]
+  examAttempts                     ExamAttempt[]
+  emailVerificationTokens          EmailVerificationToken[]
 }
 
 model Subscription {
@@ -235,4 +240,18 @@ model AttemptAnswer {
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
   numericValue     Float?
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
 }

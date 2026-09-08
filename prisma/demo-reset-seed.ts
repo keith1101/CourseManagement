@@ -281,6 +281,7 @@ async function main() {
               role: UserRole.ADMIN,
               isActive: true,
               accessLevel: AccessLevel.FREE,
+              emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
             },
             {
               id: IDS.users.freeStudent,
@@ -290,6 +291,7 @@ async function main() {
               role: UserRole.STUDENT,
               isActive: true,
               accessLevel: AccessLevel.FREE,
+              emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
             },
             {
               id: IDS.users.proStudent,
@@ -300,6 +302,7 @@ async function main() {
               isActive: true,
               accessLevel: AccessLevel.PRO,
               proExpiresAt: DATES.subscriptionExpiresAt,
+              emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
             },
             {
               id: IDS.users.lockedStudent,
@@ -309,6 +312,7 @@ async function main() {
               role: UserRole.STUDENT,
               isActive: false,
               accessLevel: AccessLevel.FREE,
+              emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
             },
           ],
         });
