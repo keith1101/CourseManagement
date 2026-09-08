@@ -89,9 +89,25 @@ Auth module xử lý đăng ký, đăng nhập, xác thực người dùng và q
 | Method | Endpoint                | Mô tả                                   | Quyền         | Trạng thái |
 | ------ | ----------------------- | --------------------------------------- | ------------- | ---------- |
 | POST   | `/api/auth/register`        | Đăng ký tài khoản học sinh              | Public        | Done       |
+| POST   | `/api/auth/verify-email`    | Xác nhận email bằng verification token  | Public        | Done       |
+| POST   | `/api/auth/resend-verification` | Gửi lại email xác nhận              | Public        | Done       |
 | POST   | `/api/auth/login`           | Đăng nhập và nhận access token          | Public        | Done       |
 | GET    | `/api/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Done       |
 | PATCH  | `/api/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Done       |
+
+Tài khoản đăng ký mới phải xác nhận email trước khi đăng nhập. Khi phát triển local,
+có thể đặt `EMAIL_PROVIDER="console"` để in verification URL trong log backend.
+Khi gửi email thật bằng Gmail API, đặt `EMAIL_PROVIDER="gmail"` và cấu hình
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
+`GMAIL_SENDER_EMAIL`. Gmail API sử dụng OAuth2 với scope
+`https://www.googleapis.com/auth/gmail.send`.
+Các yêu cầu gửi email xác nhận được giới hạn theo email (bao gồm email đầu tiên
+khi đăng ký): mặc định chờ 60 giây giữa hai lần yêu cầu và tối đa 5 lần trong
+60 phút. Có thể điều chỉnh bằng
+`EMAIL_RESEND_COOLDOWN_SECONDS`, `EMAIL_RESEND_MAX_ATTEMPTS` và
+`EMAIL_RESEND_WINDOW_MINUTES`.
+Nếu email đã tồn tại nhưng chưa xác minh, đăng ký lại sẽ phát hành token mới và gửi
+lại email xác nhận; email đã xác minh vẫn trả về lỗi trùng email.
 
 ## 2. Users Module
 

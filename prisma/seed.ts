@@ -163,6 +163,7 @@ async function main() {
             isActive: true,
             accessLevel: AccessLevel.FREE,
             proExpiresAt: null,
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
           },
           {
             id: IDS.users.freeStudent,
@@ -175,6 +176,7 @@ async function main() {
             isActive: true,
             accessLevel: AccessLevel.FREE,
             proExpiresAt: null,
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
           },
           {
             id: IDS.users.proStudent,
@@ -187,6 +189,7 @@ async function main() {
             isActive: true,
             accessLevel: AccessLevel.PRO,
             proExpiresAt: DATES.proExpiresAt,
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
           },
           {
             id: IDS.users.inactiveStudent,
@@ -199,6 +202,7 @@ async function main() {
             isActive: false,
             accessLevel: AccessLevel.FREE,
             proExpiresAt: null,
+            emailVerifiedAt: new Date('2026-01-01T00:00:00.000Z'),
           },
         ] as const;
 
