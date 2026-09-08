@@ -45,9 +45,22 @@ describe('UsersService', () => {
 
     await expect(service.findAll('student')).resolves.toEqual([safeUser]);
     const args = prisma.user.findMany.mock.calls[0][0];
+    expect(args.where.emailVerifiedAt).toEqual({ not: null });
     expect(args.where.OR).toHaveLength(3);
     expect(args.select).not.toHaveProperty('passwordHash');
     expect(args.orderBy).toEqual({ createdAt: 'desc' });
+  });
+
+  it('filters unverified users from the admin list without a search term', async () => {
+    prisma.user.findMany.mockResolvedValue([safeUser]);
+
+    await service.findAll();
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { emailVerifiedAt: { not: null } },
+      }),
+    );
   });
 
   it('returns a user detail without passwordHash', async () => {

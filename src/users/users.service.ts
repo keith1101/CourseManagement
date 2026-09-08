@@ -27,13 +27,14 @@ export class UsersService {
     async findAll(search?: string) {
         const where = search
             ? {
+                  emailVerifiedAt: { not: null },
                   OR: [
                       { fullName: { contains: search, mode: 'insensitive' as const } },
                       { email: { contains: search, mode: 'insensitive' as const } },
                       { phone: { contains: search, mode: 'insensitive' as const } },
                   ],
               }
-            : {};
+            : { emailVerifiedAt: { not: null } };
 
         return this.prismaService.user.findMany({
             where,
