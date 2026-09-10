@@ -1,5 +1,9 @@
 import { Storage } from '@google-cloud/storage';
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export type StorageUploadFile = {
@@ -16,6 +20,7 @@ export type UploadedStorageObject = {
 
 @Injectable()
 export class GcsStorageService {
+  private readonly logger = new Logger(GcsStorageService.name);
   private readonly storage: Storage;
   private readonly bucketName: string;
 
@@ -29,23 +34,39 @@ export class GcsStorageService {
     file: StorageUploadFile,
     objectName: string,
   ): Promise<UploadedStorageObject> {
-    const object = this.getBucket().file(objectName);
+    try {
+      const object = this.getBucket().file(objectName);
 
-    await object.save(file.buffer, {
-      resumable: false,
-      metadata: {
-        contentType: file.mimetype,
-        cacheControl: 'private, max-age=0',
+      await object.save(file.buffer, {
+        resumable: false,
         metadata: {
-          originalFileName: file.originalname,
+          contentType: file.mimetype,
+          cacheControl: 'private, max-age=0',
+          metadata: {
+            originalFileName: file.originalname,
+          },
         },
-      },
-    });
+      });
 
-    return {
-      objectName,
-      gsUri: `gs://${this.bucketName}/${objectName}`,
-    };
+      return {
+        objectName,
+        gsUri: `gs://${this.bucketName}/${objectName}`,
+      };
+    } catch (error) {
+      this.logStorageFailure('upload', {
+        objectName,
+        mimetype: file.mimetype,
+        size: file.size,
+      }, error);
+
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'Unable to upload file to Cloud Storage',
+      );
+    }
   }
 
   async delete(storageUri: string) {
@@ -59,16 +80,32 @@ export class GcsStorageService {
   }
 
   async getSignedReadUrl(storageUri: string, expiresInSeconds = 900) {
-    const expiresAt = Date.now() + expiresInSeconds * 1000;
-    const [url] = await this.getBucket()
-      .file(this.toObjectName(storageUri))
-      .getSignedUrl({
-        version: 'v4',
-        action: 'read',
-        expires: expiresAt,
-      });
+    try {
+      const expiresAt = Date.now() + expiresInSeconds * 1000;
+      const [url] = await this.getBucket()
+        .file(this.toObjectName(storageUri))
+        .getSignedUrl({
+          version: 'v4',
+          action: 'read',
+          expires: expiresAt,
+        });
 
-    return url;
+      return url;
+    } catch (error) {
+      this.logStorageFailure(
+        'getSignedReadUrl',
+        { storageUri, expiresInSeconds },
+        error,
+      );
+
+      if (error instanceof InternalServerErrorException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        'Unable to generate a file access URL',
+      );
+    }
   }
 
   async resolveReadUrl(storageUri: string | null | undefined) {
@@ -114,5 +151,32 @@ export class GcsStorageService {
     }
 
     return storageUri.replace(/^\/+/, '');
+  }
+
+  private logStorageFailure(
+    operation: string,
+    context: Record<string, string | number>,
+    error: unknown,
+  ) {
+    const errorDetails = error instanceof Error
+      ? {
+          name: error.name,
+          message: error.message,
+          code: (error as Error & { code?: string | number }).code,
+          status: (error as Error & { response?: { status?: number } }).response
+            ?.status,
+        }
+      : {
+          name: 'UnknownError',
+          message: 'Non-Error value rejected the Cloud Storage operation',
+        };
+
+    this.logger.error(
+      JSON.stringify({
+        operation,
+        ...context,
+        error: errorDetails,
+      }),
+    );
   }
 }

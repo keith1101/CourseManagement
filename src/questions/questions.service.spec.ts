@@ -132,12 +132,77 @@ describe('QuestionsService', () => {
       expect.objectContaining({ originalname: 'question image.png' }),
       expect.stringMatching(/^questions\/[0-9a-f-]+-question-image\.png$/),
     );
+    expect(gcsStorage.upload).toHaveBeenCalledTimes(1);
+    expect(gcsStorage.getSignedReadUrl).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       url: 'https://signed.example/image-1.png',
       imageUrl: 'https://signed.example/image-1.png',
       storageUri: 'gs://bucket/questions/image-1.png',
       expiresAt: expect.any(String),
     });
+  });
+
+  it('waits for the GCS upload before resolving', async () => {
+    let resolveUpload!: (value: { objectName: string; gsUri: string }) => void;
+    const uploadPromise = new Promise<{ objectName: string; gsUri: string }>(
+      (resolve) => {
+        resolveUpload = resolve;
+      },
+    );
+    let settled = false;
+    gcsStorage.upload.mockReturnValue(uploadPromise);
+    gcsStorage.getSignedReadUrl.mockResolvedValue('https://signed.example/image.png');
+
+    const resultPromise = service
+      .uploadImage({
+        buffer: Buffer.from('image'),
+        originalname: 'image.png',
+        mimetype: 'image/png',
+        size: 5,
+      })
+      .finally(() => {
+        settled = true;
+      });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(gcsStorage.upload).toHaveBeenCalledTimes(1);
+
+    resolveUpload({
+      objectName: 'questions/image.png',
+      gsUri: 'gs://bucket/questions/image.png',
+    });
+    await expect(resultPromise).resolves.toEqual(
+      expect.objectContaining({
+        storageUri: 'gs://bucket/questions/image.png',
+      }),
+    );
+  });
+
+  it('rejects a non-image before calling Cloud Storage', async () => {
+    await expect(
+      service.uploadImage({
+        buffer: Buffer.from('not-image'),
+        originalname: 'document.pdf',
+        mimetype: 'application/pdf',
+        size: 9,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(gcsStorage.upload).not.toHaveBeenCalled();
+  });
+
+  it('rejects an image larger than 5 MB before calling Cloud Storage', async () => {
+    await expect(
+      service.uploadImage({
+        buffer: Buffer.alloc(5 * 1024 * 1024 + 1),
+        originalname: 'large.png',
+        mimetype: 'image/png',
+        size: 5 * 1024 * 1024 + 1,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(gcsStorage.upload).not.toHaveBeenCalled();
   });
 
   it('rejects Base64 image references in question JSON', async () => {
