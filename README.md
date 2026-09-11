@@ -301,6 +301,56 @@ Attempts module xử lý quá trình làm bài, lưu câu trả lời, nộp bà
 | POST   | `/api/attempts/:id/submit`    | Nộp bài                      | Student       | Done       |
 | GET    | `/api/attempts/:id/result`    | Xem kết quả bài làm          | Student/Admin | Done       |
 
+Khi `SEQUENTIAL_EXAM_FLOW_ENABLED=true`, attempt mới dùng luồng tuần tự v2.
+Các endpoint v2 là:
+
+| Method | Endpoint | Mô tả |
+| ------ | -------- | ----- |
+| GET | `/api/attempts/:id/session` | Lấy câu hiện tại, tiến độ và timer do server cấp |
+| POST | `/api/attempts/:id/current-question/submit` | Chấm câu hiện tại; bắt buộc `Idempotency-Key` |
+| POST | `/api/attempts/:id/current-question/expire` | Ghi nhận hết giờ; UX giống câu trả lời sai |
+| POST | `/api/attempts/:id/current-question/continue` | Hoàn tất phản hồi và chuyển câu; bắt buộc `Idempotency-Key` |
+
+Attempt v2 không được gọi `/api/attempts/:id/answers` hoặc `/api/attempts/:id/submit`.
+Progress được khóa bằng `progressVersion` và câu hiện tại được xác định từ
+database; `questionId`, `questionIndex` và `currentQuestion` do client gửi không
+được dùng để mở khóa câu khác. Câu trả lời đúng tự động chuyển sau 3 giây,
+trong khi câu sai/hết giờ luôn cần thao tác Continue. Attempt cũ vẫn giữ
+`flowVersion=1` và contract cũ.
+
+### Kiểm thử submission flow
+
+Unit tests và build:
+
+```bash
+pnpm test
+pnpm build
+```
+
+Integration tests phải dùng PostgreSQL riêng cho test. Đặt `TEST_DATABASE_URL`
+và trỏ `DATABASE_URL` tới cùng database disposable trước khi migrate:
+
+```powershell
+$env:TEST_DATABASE_URL = 'postgresql://USER:PASSWORD@HOST:5432/course_management_test?schema=public'
+$env:DATABASE_URL = $env:TEST_DATABASE_URL
+pnpm db:deploy
+pnpm test:integration
+```
+
+Không chạy các lệnh này với database cloud proxy/development/production.
+Browser E2E nằm ở frontend và yêu cầu attempt v2 đã seed:
+
+```powershell
+$env:E2E_ENABLED = 'true'
+$env:E2E_EXAM_URL = 'http://127.0.0.1:3000/student/attempts/<attempt-id>/take'
+$env:E2E_STORAGE_STATE = 'playwright/.auth/student.json' # hoặc dùng credentials
+# Optional: one fresh attempt URL per additional scenario.
+# E2E_INCORRECT_URL, E2E_DOUBLE_SUBMIT_URL, E2E_REFRESH_URL
+pnpm test:e2e
+```
+
+Chromium là gate bắt buộc; đặt `E2E_NIGHTLY=true` để thêm Firefox/WebKit smoke.
+
 Ghi chú: Mỗi câu hỏi có thời gian riêng. Câu hỏi `SHORT_ANSWER` lưu `selectedOptionId = null`; câu hỏi trắc nghiệm chỉ chấp nhận option thuộc chính câu hỏi đó.
 
 Nếu học sinh trả lời sai hoặc hết giờ, hệ thống có thể hiển thị:

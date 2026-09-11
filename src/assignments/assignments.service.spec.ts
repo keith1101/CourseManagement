@@ -111,6 +111,67 @@ describe('AssignmentsService', () => {
     expect(result[0].status).toBe(AssignmentStatus.COMPLETED);
   });
 
+  it('marks a failed legacy attempt as eligible for retake', () => {
+    const failedLegacy = (service as any).withStatus({
+      ...assignment,
+      examAttempts: [{
+        id: 'legacy-attempt',
+        status: AttemptStatus.COMPLETED,
+        flowVersion: 1,
+        correctCount: 1,
+        totalQuestions: 3,
+      }],
+    });
+    expect(failedLegacy.status).toBe(AssignmentStatus.COMPLETED);
+    expect(failedLegacy.canRetake).toBe(true);
+
+    const perfectLegacy = (service as any).withStatus({
+      ...assignment,
+      examAttempts: [{
+        id: 'perfect-attempt',
+        status: AttemptStatus.COMPLETED,
+        flowVersion: 1,
+        correctCount: 3,
+        totalQuestions: 3,
+      }],
+    });
+    expect(perfectLegacy.canRetake).toBe(false);
+
+    const failedSequential = (service as any).withStatus({
+      ...assignment,
+      examAttempts: [{
+        id: 'sequential-attempt',
+        status: AttemptStatus.COMPLETED,
+        flowVersion: 2,
+        correctCount: 1,
+        totalQuestions: 3,
+      }],
+    });
+    expect(failedSequential.canRetake).toBe(false);
+
+    const activeRetake = (service as any).withStatus({
+      ...assignment,
+      examAttempts: [
+        {
+          id: 'active-retake',
+          status: AttemptStatus.IN_PROGRESS,
+          flowVersion: 2,
+          correctCount: null,
+          totalQuestions: 3,
+        },
+        {
+          id: 'legacy-attempt',
+          status: AttemptStatus.COMPLETED,
+          flowVersion: 1,
+          correctCount: 1,
+          totalQuestions: 3,
+        },
+      ],
+    });
+    expect(activeRetake.status).toBe(AssignmentStatus.IN_PROGRESS);
+    expect(activeRetake.canRetake).toBe(false);
+  });
+
   it('hides another student assignment as not found', async () => {
     prisma.examAssignment.findUnique.mockResolvedValue(assignment);
 

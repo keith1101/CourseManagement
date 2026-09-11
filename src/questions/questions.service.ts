@@ -1,5 +1,6 @@
 import {
     BadRequestException,
+    ConflictException,
     ForbiddenException,
     Injectable,
     NotFoundException,
@@ -21,6 +22,13 @@ import {
 import { ExamsService } from '../exams/exams.service';
 
 const questionInclude = {
+    exam: {
+        select: {
+            id: true,
+            status: true,
+            deletedAt: true,
+        },
+    },
     questionOptions: {
         orderBy: {
             position: 'asc' as const,
@@ -77,7 +85,7 @@ export class QuestionsService {
         const [exam, subject] = await Promise.all([
             this.prismaService.exam.findUnique({
                 where: { id: examId, deletedAt: null },
-                select: { id: true },
+                select: { id: true, status: true },
             }),
             this.prismaService.subject.findUnique({
                 where: { id: createQuestionDto.subjectId },
@@ -87,6 +95,13 @@ export class QuestionsService {
 
         if (!exam) {
             throw new NotFoundException('Exam not found');
+        }
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(examId);
+        } else if ((exam as any).status && (exam as any).status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
         }
         if (!subject || !subject.isActive) {
             throw new NotFoundException('Subject not found');
@@ -162,6 +177,42 @@ export class QuestionsService {
             }
 
             await this.examsService.assertStudentCanAccessExam(examId, userId);
+
+            // The legacy screen still needs its full question collection while
+            // existing v1 attempts finish. Version-2 attempts never pass this
+            // check, so a student cannot use this endpoint to enumerate locked
+            // questions or their answer keys.
+            const attemptModel = (this.prismaService as any).examAttempt;
+            if (attemptModel?.findFirst) {
+                const sequentialAttempt = await attemptModel.findFirst({
+                    where: {
+                        examId,
+                        userId,
+                        status: 'IN_PROGRESS',
+                        flowVersion: 2,
+                    },
+                    select: { id: true },
+                });
+                if (sequentialAttempt) {
+                    throw new ForbiddenException(
+                        'Question access requires the current-question endpoint for a sequential attempt',
+                    );
+                }
+                const legacyAttempt = await attemptModel.findFirst({
+                    where: {
+                        examId,
+                        userId,
+                        status: 'IN_PROGRESS',
+                        flowVersion: 1,
+                    },
+                    select: { id: true },
+                });
+                if (!legacyAttempt) {
+                    throw new ForbiddenException(
+                        'Question access requires an active legacy attempt',
+                    );
+                }
+            }
         }
 
         if (includeAnswers) {
@@ -241,6 +292,14 @@ export class QuestionsService {
     async update(id: string, updateQuestionsDto: UpdateQuestionsDto) {
         const existing = (await this.find(id, true)) as any;
 
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(existing.examId);
+        } else if (existing.exam?.status && existing.exam.status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
+        }
+
         if (updateQuestionsDto.subjectId !== undefined) {
             await this.ensureActiveSubject(updateQuestionsDto.subjectId);
         }
@@ -306,6 +365,14 @@ export class QuestionsService {
 
         if (!question) {
             throw new NotFoundException('Question not found');
+        }
+
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(question.examId);
+        } else if ((question as any).exam?.status && (question as any).exam.status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
         }
 
         const numberOfQuestions = await this.prismaService.question.count({
@@ -387,6 +454,14 @@ export class QuestionsService {
             throw new NotFoundException('Question not found');
         }
 
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(question.examId);
+        } else if ((question as any).exam?.status && (question as any).exam.status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
+        }
+
         return this.prismaService.$transaction(async (transaction) => {
             const deletedQuestion = await transaction.question.update({
                 where: { id },
@@ -415,6 +490,14 @@ export class QuestionsService {
     // QuestionOption sub-resource methods
     async createOption(questionId: string, dto: CreateQuestionOptionDto) {
         const question = (await this.find(questionId, true)) as any;
+
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(question.examId);
+        } else if (question.exam?.status && question.exam.status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
+        }
 
         this.validateImageReference(dto.imageUrl);
 
@@ -453,10 +536,11 @@ export class QuestionsService {
                 isCorrect: true,
                 question: {
                     select: {
+                        examId: true,
                         questionType: true,
                         correctTextAnswer: true,
                         deletedAt: true,
-                        exam: { select: { deletedAt: true } },
+                        exam: { select: { deletedAt: true, status: true } },
                         questionOptions: {
                             select: {
                                 id: true,
@@ -470,6 +554,16 @@ export class QuestionsService {
 
         if (!option || option.question?.deletedAt || option.question?.exam?.deletedAt) {
             throw new NotFoundException('Option not found');
+        }
+
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(
+                option.question.examId,
+            );
+        } else if (option.question.exam?.status && option.question.exam.status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
         }
 
         this.validateAnswerKey(
@@ -500,10 +594,11 @@ export class QuestionsService {
                 isCorrect: true,
                 question: {
                     select: {
+                        examId: true,
                         questionType: true,
                         correctTextAnswer: true,
                         deletedAt: true,
-                        exam: { select: { deletedAt: true } },
+                        exam: { select: { deletedAt: true, status: true } },
                         questionOptions: {
                             select: {
                                 id: true,
@@ -517,6 +612,16 @@ export class QuestionsService {
 
         if (!option || option.question?.deletedAt || option.question?.exam?.deletedAt) {
             throw new NotFoundException('Option not found');
+        }
+
+        if (
+            typeof (this.examsService as any).assertExamCanEditQuestions === 'function'
+        ) {
+            await (this.examsService as ExamsService).assertExamCanEditQuestions(
+                option.question.examId,
+            );
+        } else if (option.question.exam?.status && option.question.exam.status !== 'DRAFT') {
+            throw new ConflictException('Questions can only be changed in a draft exam');
         }
 
         this.validateAnswerKey(

@@ -2,6 +2,7 @@ import {
     Body,
     Controller,
     Get,
+    Headers,
     Param,
     Post,
     Query,
@@ -15,6 +16,8 @@ import { UserRole } from '../../generated/client/client';
 import { AttemptsService } from './attempts.service';
 import { AttemptQueryDto } from './dto/attempt-query.dto';
 import { SaveAttemptAnswerDto } from './dto/save-attempt-answer.dto';
+import { SequentialAnswerDto } from './dto/sequential-answer.dto';
+import { SequentialContinueDto } from './dto/sequential-continue.dto';
 
 type AuthenticatedRequest = {
     user: {
@@ -49,6 +52,58 @@ export class AttemptsController {
             ? request.user.sub
             : undefined;
         return this.attemptsService.findOne(id, userId);
+    }
+
+    @Roles(UserRole.STUDENT)
+    @Get(':id/session')
+    session(
+        @Param('id') id: string,
+        @Request() request: AuthenticatedRequest,
+    ) {
+        return this.attemptsService.getSequentialSession(id, request.user.sub);
+    }
+
+    @Roles(UserRole.STUDENT)
+    @Post(':id/current-question/submit')
+    submitSequentialAnswer(
+        @Param('id') id: string,
+        @Request() request: AuthenticatedRequest,
+        @Headers('idempotency-key') idempotencyKey: string | undefined,
+        @Body() dto: SequentialAnswerDto,
+    ) {
+        return this.attemptsService.submitSequentialAnswer(
+            id,
+            request.user.sub,
+            dto,
+            idempotencyKey ?? '',
+            new Date(),
+        );
+    }
+
+    @Roles(UserRole.STUDENT)
+    @Post(':id/current-question/expire')
+    expireSequentialQuestion(
+        @Param('id') id: string,
+        @Request() request: AuthenticatedRequest,
+    ) {
+        return this.attemptsService.expireSequentialQuestion(id, request.user.sub);
+    }
+
+    @Roles(UserRole.STUDENT)
+    @Post(':id/current-question/continue')
+    continueSequentialQuestion(
+        @Param('id') id: string,
+        @Request() request: AuthenticatedRequest,
+        @Headers('idempotency-key') idempotencyKey: string | undefined,
+        @Body() dto: SequentialContinueDto,
+    ) {
+        return this.attemptsService.continueSequentialQuestion(
+            id,
+            request.user.sub,
+            dto,
+            idempotencyKey ?? '',
+            new Date(),
+        );
     }
 
     @Roles(UserRole.STUDENT)

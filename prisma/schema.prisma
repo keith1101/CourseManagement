@@ -45,6 +45,15 @@ enum AttemptStatus {
   ABANDONED
 }
 
+enum AttemptQuestionStatus {
+  LOCKED
+  ACTIVE
+  CORRECT
+  INCORRECT
+  TIMED_OUT
+  COMPLETED
+}
+
 model User {
   id                               String                   @id @default(uuid())
   fullName                         String
@@ -154,6 +163,7 @@ model Question {
   questionOptions         QuestionOption[]
   questionAcceptedAnswers QuestionAcceptedAnswer[]
   attemptAnswers          AttemptAnswer[]
+  attemptQuestionProgress AttemptQuestionProgress[]
 
   @@index([subjectId])
 }
@@ -206,21 +216,53 @@ model ExamAssignment {
 }
 
 model ExamAttempt {
-  id               String          @id @default(uuid())
-  userId           String
-  user             User            @relation(fields: [userId], references: [id])
-  examId           String
-  exam             Exam            @relation(fields: [examId], references: [id])
-  assignmentId     String?
-  assignment       ExamAssignment? @relation(fields: [assignmentId], references: [id])
-  status           AttemptStatus   @default(IN_PROGRESS)
-  submittedAt      DateTime?
-  correctCount     Int             @default(0)
-  totalQuestions   Int
-  startedAt        DateTime        @default(now())
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  attemptedAnswers AttemptAnswer[]
+  id                       String                    @id @default(uuid())
+  userId                   String
+  user                     User                      @relation(fields: [userId], references: [id])
+  examId                   String
+  exam                     Exam                      @relation(fields: [examId], references: [id])
+  assignmentId             String?
+  assignment               ExamAssignment?           @relation(fields: [assignmentId], references: [id])
+  status                   AttemptStatus              @default(IN_PROGRESS)
+  submittedAt              DateTime?
+  correctCount             Int                        @default(0)
+  totalQuestions           Int
+  flowVersion              Int                        @default(1)
+  progressVersion          Int                        @default(0)
+  currentAttemptQuestionId String?                    @unique
+  startedAt                DateTime                   @default(now())
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  attemptedAnswers         AttemptAnswer[]
+  attemptQuestionProgress  AttemptQuestionProgress[]  @relation("AttemptQuestionProgress")
+  currentAttemptQuestion   AttemptQuestionProgress?   @relation("CurrentAttemptQuestion", fields: [currentAttemptQuestionId], references: [id], onDelete: SetNull)
+}
+
+model AttemptQuestionProgress {
+  id                String                @id @default(uuid())
+  attemptId         String
+  questionId        String
+  ordinal           Int
+  timeLimitSeconds  Int
+  status            AttemptQuestionStatus @default(LOCKED)
+  activatedAt       DateTime?
+  deadlineAt        DateTime?
+  submittedAt       DateTime?
+  advanceAfter      DateTime?
+  completedAt       DateTime?
+  isCorrect         Boolean?
+  timedOut          Boolean               @default(false)
+  lastAdvanceKey    String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  examAttempt       ExamAttempt           @relation("AttemptQuestionProgress", fields: [attemptId], references: [id], onDelete: Cascade)
+  question          Question              @relation(fields: [questionId], references: [id], onDelete: Restrict)
+  currentForAttempt ExamAttempt?          @relation("CurrentAttemptQuestion")
+
+  @@unique([attemptId, questionId])
+  @@unique([attemptId, ordinal])
+  @@index([attemptId, status])
+  @@unique([attemptId, lastAdvanceKey])
 }
 
 model AttemptAnswer {
@@ -236,10 +278,15 @@ model AttemptAnswer {
   normalizedText   String?
   content          String?
   isCorrect        Boolean         @default(false)
+  submittedAt      DateTime?
+  timedOut         Boolean         @default(false)
+  submissionKey    String?
   position         Int
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
   numericValue     Float?
+  @@index([attemptId, questionId])
+  @@unique([attemptId, submissionKey])
 }
 
 model EmailVerificationToken {

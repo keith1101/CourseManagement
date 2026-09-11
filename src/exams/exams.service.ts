@@ -109,6 +109,11 @@ export class ExamsService {
 
   async update(id: string, updateExamDto: UpdateExamDto) {
     const existing = await this.getExamForAdmin(id);
+    if (existing.status !== ExamStatus.DRAFT) {
+      throw new ConflictException(
+        'Published exams are immutable; move the exam to draft before editing',
+      );
+    }
     const data: Prisma.ExamUncheckedUpdateInput = {};
 
     if (updateExamDto.title !== undefined) {
@@ -154,6 +159,17 @@ export class ExamsService {
       throw new ConflictException('Only PUBLISHED exams can be unpublished');
     }
 
+    const activeAttempts = this.prisma.examAttempt?.count
+      ? await this.prisma.examAttempt.count({
+          where: { examId: id, status: 'IN_PROGRESS' },
+        })
+      : 0;
+    if (activeAttempts > 0) {
+      throw new ConflictException(
+        'Published exam cannot be unpublished while attempts are in progress',
+      );
+    }
+
     return this.prisma.exam.update({
       where: { id },
       data: {
@@ -178,6 +194,17 @@ export class ExamsService {
       throw new NotFoundException('Exam not found');
     }
 
+    const activeAttempts = this.prisma.examAttempt?.count
+      ? await this.prisma.examAttempt.count({
+          where: { examId: id, status: 'IN_PROGRESS' },
+        })
+      : 0;
+    if (activeAttempts > 0) {
+      throw new ConflictException(
+        'Exam cannot be archived while attempts are in progress',
+      );
+    }
+
     return this.prisma.exam.update({
       where: { id },
       data: {
@@ -187,6 +214,32 @@ export class ExamsService {
       },
       include: examInclude,
     });
+  }
+
+  /** Question membership, ordering, and answer keys are immutable while an
+   * exam can be used by an active attempt. */
+  async assertExamCanEditQuestions(examId: string) {
+    const exam = await this.prisma.exam.findUnique({
+      where: { id: examId, deletedAt: null },
+      select: { id: true, status: true },
+    });
+    if (!exam) throw new NotFoundException('Exam not found');
+    if (exam.status !== ExamStatus.DRAFT) {
+      throw new ConflictException(
+        'Questions can only be changed while the exam is a draft',
+      );
+    }
+
+    const activeAttempts = this.prisma.examAttempt?.count
+      ? await this.prisma.examAttempt.count({
+          where: { examId, status: 'IN_PROGRESS' },
+        })
+      : 0;
+    if (activeAttempts > 0) {
+      throw new ConflictException(
+        'Exam questions cannot be changed while attempts are in progress',
+      );
+    }
   }
 
   private async getExamForAdmin(id: string) {
