@@ -40,7 +40,10 @@ export class QuestionsController {
             limits: { fileSize: 5 * 1024 * 1024 },
             fileFilter: (_request, file, callback) => {
                 if (!file.mimetype?.startsWith('image/')) {
-                    callback(new Error('Only image files are allowed'), false);
+                    callback(
+                        new BadRequestException('Only image files are allowed'),
+                        false,
+                    );
                     return;
                 }
 

@@ -31,14 +31,15 @@ const assignmentInclude = {
             accessLevel: true,
         },
     },
-        examAttempts: {
-            select: {
-                id: true,
-                status: true,
-                startedAt: true,
-                submittedAt: true,
-                correctCount: true,
-                totalQuestions: true,
+    examAttempts: {
+        select: {
+            id: true,
+            status: true,
+            flowVersion: true,
+            startedAt: true,
+            submittedAt: true,
+            correctCount: true,
+            totalQuestions: true,
         },
         orderBy: {
             startedAt: 'desc' as const,
@@ -230,29 +231,50 @@ export class AssignmentsService {
     private withStatus<
         T extends {
             dueAt: Date;
-            examAttempts: Array<{ status: AttemptStatus; id: string; correctCount: number | null; totalQuestions: number }>;
+            examAttempts: Array<{
+                status: AttemptStatus;
+                id: string;
+                flowVersion?: number | null;
+                correctCount: number | null;
+                totalQuestions: number;
+            }>;
         },
     >(assignment: T) {
-        const hasCompletedAttempt = assignment.examAttempts.some(
+        const latestCompletedAttempt = assignment.examAttempts.find(
             (attempt) => attempt.status === AttemptStatus.COMPLETED,
         );
+        const hasCompletedAttempt = !!latestCompletedAttempt;
         const hasInProgressAttempt = assignment.examAttempts.some(
             (attempt) => attempt.status === AttemptStatus.IN_PROGRESS,
         );
+        // Attempts created before the sequential-flow rollout have
+        // flowVersion = 1 (or no value in older API fixtures). If the student
+        // did not answer every question correctly, keep the assignment
+        // completed for reporting but expose a safe retake action. A v2
+        // attempt is intentionally not treated as a legacy retake.
+        const canRetake = !hasInProgressAttempt &&
+            !!latestCompletedAttempt &&
+            (latestCompletedAttempt.flowVersion ?? 1) < 2 &&
+            latestCompletedAttempt.correctCount !== null &&
+            latestCompletedAttempt.correctCount < latestCompletedAttempt.totalQuestions &&
+            assignment.dueAt.getTime() > Date.now();
 
         let status = AssignmentStatus.PENDING;
 
-        if (hasCompletedAttempt) {
+        // An active retake must remain resumable even when an older completed
+        // attempt is still attached to the assignment.
+        if (hasInProgressAttempt) {
+            status = AssignmentStatus.IN_PROGRESS;
+        } else if (hasCompletedAttempt) {
             status = AssignmentStatus.COMPLETED;
         } else if (assignment.dueAt.getTime() < Date.now()) {
             status = AssignmentStatus.OVERDUE;
-        } else if (hasInProgressAttempt) {
-            status = AssignmentStatus.IN_PROGRESS;
         }
 
         return {
             ...assignment,
             status,
+            canRetake,
         };
     }
 }

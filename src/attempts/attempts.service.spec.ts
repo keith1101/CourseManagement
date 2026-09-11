@@ -125,7 +125,13 @@ describe('AttemptsService', () => {
         findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(),
         update: jest.fn(), findMany: jest.fn(),
       },
+      attemptQuestionProgress: {
+        findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(),
+        createMany: jest.fn(), update: jest.fn(), count: jest.fn(),
+      },
       question: { count: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
+      questionOption: { findMany: jest.fn() },
+      questionAcceptedAnswer: { findMany: jest.fn() },
       attemptAnswer: {
         findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(),
       },
@@ -202,6 +208,162 @@ describe('AttemptsService', () => {
     expect(result).toEqual(expect.objectContaining({ id: 'attempt-1', questions: [] }));
   });
 
+  it('retries PostgreSQL serialization failures reported by the Prisma adapter', async () => {
+    const transactionCallback = jest.fn(async () => ({ ok: true }));
+    prisma.$transaction
+      .mockRejectedValueOnce({
+        cause: {
+          originalCode: '40001',
+          kind: 'TransactionWriteConflict',
+        },
+      })
+      .mockImplementationOnce((callback: (tx: unknown) => Promise<unknown>) =>
+        callback({}),
+      );
+
+    await expect(
+      (service as any).runSequentialTransaction(transactionCallback),
+    ).resolves.toEqual({ ok: true });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(transactionCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it('serializes sequential mutations on the owning attempt row', async () => {
+    const queryRaw = jest.fn().mockResolvedValue([]);
+    const transaction: any = {
+      $queryRaw: queryRaw,
+      examAttempt: { findUnique: jest.fn() },
+      attemptQuestionProgress: { findUnique: jest.fn() },
+      attemptAnswer: { findFirst: jest.fn() },
+    };
+    transaction.examAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1',
+      userId: 'student-1',
+      examId: 'exam-1',
+      status: AttemptStatus.IN_PROGRESS,
+      flowVersion: 2,
+      progressVersion: 0,
+      currentAttemptQuestionId: null,
+    });
+
+    prisma.$transaction.mockImplementation(
+      async (callback: (tx: any) => Promise<unknown>, options: any) => {
+        expect(options).toEqual(expect.objectContaining({ isolationLevel: 'ReadCommitted' }));
+        return callback(transaction);
+      },
+    );
+
+    await expect(
+      (service as any).runSequentialTransaction((tx: any) =>
+        (service as any).getSequentialMutationState(tx, 'attempt-1', 'student-1'),
+      ),
+    ).resolves.toEqual(expect.objectContaining({ id: 'attempt-1' }));
+
+    expect(queryRaw).toHaveBeenCalledTimes(1);
+    expect(queryRaw.mock.calls[0][0].join('')).toContain('FOR UPDATE');
+  });
+
+  it.each([
+    ['Prisma P2034', { code: 'P2034' }],
+    ['Prisma idempotency unique race', { code: 'P2002' }],
+    ['pg serialization code', { cause: { originalCode: '40001' } }],
+    ['pg deadlock code', { cause: { originalCode: '40P01' } }],
+    ['Prisma adapter transaction conflict', { cause: { kind: 'TransactionWriteConflict' } }],
+  ])('recognizes %s as a retryable sequential transaction failure', (_label, failure) => {
+    expect((service as any).isSequentialSerializationFailure(failure)).toBe(true);
+  });
+
+  it('converts exhausted serialization retries into a safe conflict instead of HTTP 500', async () => {
+    prisma.$transaction.mockRejectedValue({
+      cause: { originalCode: '40001', kind: 'TransactionWriteConflict' },
+    });
+
+    await expect(
+      (service as any).runSequentialTransaction(async () => ({ ok: true })),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.$transaction).toHaveBeenCalledTimes(5);
+  });
+
+  it('uses the exact deadline boundary for timeout grading', async () => {
+    const deadline = new Date('2026-09-11T04:00:00.000Z');
+    const transaction: any = {
+      examAttempt: { findUnique: jest.fn(), update: jest.fn() },
+      attemptQuestionProgress: {
+        findUnique: jest.fn(), update: jest.fn(), findFirst: jest.fn(), count: jest.fn(),
+      },
+      attemptAnswer: { findFirst: jest.fn().mockResolvedValue(null), create: jest.fn(), update: jest.fn() },
+    };
+    transaction.examAttempt.findUnique.mockResolvedValue({
+      id: 'attempt-1', userId: 'student-1', examId: 'exam-1',
+      status: AttemptStatus.IN_PROGRESS, flowVersion: 2, progressVersion: 0,
+      currentAttemptQuestionId: 'progress-1',
+    });
+    transaction.attemptQuestionProgress.findUnique.mockResolvedValue({
+      id: 'progress-1', attemptId: 'attempt-1', questionId: 'question-1', ordinal: 0,
+      status: 'ACTIVE', timeLimitSeconds: 30, activatedAt: new Date(deadline.getTime() - 30_000),
+      deadlineAt: deadline, submittedAt: null, advanceAfter: null, completedAt: null,
+      isCorrect: null, timedOut: false, lastAdvanceKey: null,
+    });
+    transaction.attemptAnswer.create.mockResolvedValue({ id: 'answer-1' });
+    prisma.$transaction.mockImplementation(async (callback: (tx: any) => unknown) => callback(transaction));
+    jest.spyOn(service as any, 'getSequentialQuestionForEvaluation').mockResolvedValue(questionWithAnswerData);
+    jest.spyOn(service as any, 'getSequentialFeedback').mockResolvedValue({
+      questionId: 'question-1', isCorrect: false, timedOut: true,
+    });
+
+    const result = await service.submitSequentialAnswer(
+      'attempt-1',
+      'student-1',
+      { questionId: 'question-1', progressVersion: 0, selectedOptionId: 'correct-option' },
+      'deadline-key',
+      deadline,
+    );
+
+    expect(result).toEqual(expect.objectContaining({
+      status: 'TIMED_OUT',
+      timedOut: true,
+      isCorrect: false,
+      advanceAfter: null,
+    }));
+    expect(transaction.attemptQuestionProgress.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'TIMED_OUT', timedOut: true, advanceAfter: null }),
+    }));
+    expect(transaction.attemptAnswer.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ timedOut: true, submittedAt: deadline, submissionKey: 'deadline-key' }),
+    }));
+  });
+
+  it('transitions a correct question to the next active question only after completion', async () => {
+    const transaction: any = {
+      attemptQuestionProgress: {
+        update: jest.fn(),
+        findFirst: jest.fn().mockResolvedValue({ id: 'progress-2', timeLimitSeconds: 20 }),
+      },
+      examAttempt: { update: jest.fn() },
+    };
+    const now = new Date('2026-09-11T04:00:00.000Z');
+
+    await (service as any).completeSequentialCurrent(
+      transaction,
+      { id: 'attempt-1', current: { id: 'progress-1', ordinal: 0 } },
+      now,
+      'continue-key',
+    );
+
+    expect(transaction.attemptQuestionProgress.update).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: { id: 'progress-1' },
+      data: expect.objectContaining({ status: 'COMPLETED', completedAt: now, lastAdvanceKey: 'continue-key' }),
+    }));
+    expect(transaction.attemptQuestionProgress.update).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      where: { id: 'progress-2' },
+      data: expect.objectContaining({ status: 'ACTIVE', activatedAt: now }),
+    }));
+    expect(transaction.examAttempt.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ currentAttemptQuestionId: 'progress-2', progressVersion: { increment: 1 } }),
+    }));
+  });
+
   it('rejects an unassigned free exam', async () => {
     prisma.exam.findUnique.mockResolvedValue({
       id: 'exam-1', status: 'PUBLISHED', title: 'Exam', accessLevel: 'FREE',
@@ -263,7 +425,7 @@ describe('AttemptsService', () => {
     expect(result).not.toHaveProperty('isCorrect');
   });
 
-  it('saves a multiple-choice draft without grading or revealing the answer key', async () => {
+  it('rejects an unsubmitted answer', async () => {
     prisma.examAttempt.findUnique.mockResolvedValue({
       id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
     });
@@ -277,27 +439,10 @@ describe('AttemptsService', () => {
       ],
       questionAcceptedAnswers: [],
     });
-    prisma.attemptAnswer.findFirst.mockResolvedValue(null);
-    prisma.attemptAnswer.create.mockImplementation(async ({ data }: any) => ({
-      id: 'answer-1',
-      attemptId: 'attempt-1',
-      ...data,
-    }));
-
-    const result = await service.saveAnswer('attempt-1', 'student-1', {
+    await expect(service.saveAnswer('attempt-1', 'student-1', {
       questionId: 'question-1', selectedOptionId: 'valid-option',
-    });
-
-    expect(prisma.attemptAnswer.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        selectedOptionId: 'valid-option',
-        isCorrect: false,
-      }),
-    });
-    expect(result).not.toHaveProperty('isCorrect');
-    expect(result).not.toHaveProperty('correctOptionId');
-    expect(result).not.toHaveProperty('explanation');
-    expect(gcsStorage.resolveReadUrl).not.toHaveBeenCalled();
+    })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.attemptAnswer.create).not.toHaveBeenCalled();
   });
 
   it('rejects a multiple-choice option belonging to another question', async () => {
