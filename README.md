@@ -152,12 +152,12 @@ Các môn học mặc định:
 
 ## 4. Materials Module
 
-Materials quản lý metadata và liên kết tài liệu học tập. Backend hiện chưa upload
-binary hoặc tích hợp storage provider; `storageUrl` và `embedUrl` phải trỏ tới
-nguồn đã có sẵn.
+Materials quản lý metadata và liên kết tài liệu học tập. Binary được upload vào
+private Cloudflare R2; `storageUrl` và `embedUrl` vẫn là các field API hiện tại.
 
 | Method | Endpoint                         | Mô tả                         | Quyền         | Trạng thái |
 | ------ | -------------------------------- | ----------------------------- | ------------- | ---------- |
+| POST   | `/api/materials/upload`          | Upload PDF/DOCX vào R2        | Admin         | Done       |
 | POST   | `/api/materials`                 | Tạo metadata tài liệu         | Admin         | Done       |
 | GET    | `/api/materials`                 | Lấy danh sách tài liệu        | Student/Admin | Done       |
 | GET    | `/api/materials/:id`             | Xem chi tiết tài liệu         | Student/Admin | Done       |
@@ -168,7 +168,7 @@ nguồn đã có sẵn.
 
 Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
 
-`PDF` và `DOCX` cần `storageUrl` hợp lệ; `EMBEDDED_VIDEO` cần `embedUrl` hợp lệ.
+`PDF` và `DOCX` cần `storageUrl` hợp lệ (R2 object key hoặc URL legacy); `EMBEDDED_VIDEO` cần `embedUrl` hợp lệ.
 Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
 active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
 
@@ -177,7 +177,7 @@ shorts, live, embed, v/e, mobile, music và các link redirect/attribution về
 `https://www.youtube.com/embed/{videoId}` trước khi validate và lưu. URL của
 nguồn video khác YouTube được giữ nguyên.
 
-### Upload file lên Google Cloud Storage
+### Upload file lên Cloudflare R2
 
 Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với
 `multipart/form-data`:
@@ -189,21 +189,25 @@ Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với
 | `title` | Có | Tên tài liệu |
 | `accessLevel` | Có | `FREE` hoặc `PRO` |
 
-File được lưu private trong bucket qua `GCS_BUCKET_NAME`; database chỉ lưu
-`gs://...` và metadata file. Dùng `GET /api/materials/:id/download` để nhận
-Signed URL có thời hạn 15 phút. Video nhúng vẫn dùng `embedUrl` như cũ.
+File được lưu private trong bucket R2; database chỉ lưu object key (ví dụ
+`materials/{materialId}/file.pdf`), không lưu signed URL. Dùng
+`GET /api/materials/:id/download` để nhận signed URL có thời hạn 15 phút.
+Question image, hint image, explanation image và option image cũng theo cùng
+quy tắc. Các URL GCS cũ được coi là legacy/unavailable; object cũ không được
+migrate.
 
 Cấu hình backend qua `.env`:
 
 ```env
-GCP_PROJECT_ID=course-management-2026
-GCS_BUCKET_NAME=course-media-bucket
-GOOGLE_APPLICATION_CREDENTIALS=C:/secure/course-media-uploader.json
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=course-media
+# Optional; defaults to https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+R2_ENDPOINT=
+R2_SIGNED_URL_TTL_SECONDS=900
 ```
 
-Local development có thể dùng ADC hoặc Service Account key đặt ngoài repository.
-Khi chạy trên Google Cloud, nên attach Service Account vào Cloud Run/Compute
-thay vì lưu key trong ứng dụng.
 
 ## 5. Exams Module
 
@@ -239,6 +243,7 @@ Questions module quản lý câu hỏi trong đề thi. Khi tạo hoặc đổi 
 
 | Method | Endpoint                   | Mô tả                        | Quyền         | Trạng thái |
 | ------ | -------------------------- | ---------------------------- | ------------- | ---------- |
+| POST   | `/api/questions/images`    | Upload ảnh câu hỏi vào R2    | Admin         | Done       |
 | GET    | `/api/exams/:examId/questions` | Lấy danh sách câu hỏi của đề | Student/Admin | Done       |
 | POST   | `/api/exams/:examId/questions` | Thêm câu hỏi vào đề thi      | Admin         | Done       |
 | GET    | `/api/questions/:id`           | Xem chi tiết câu hỏi         | Admin         | Done       |

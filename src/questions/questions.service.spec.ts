@@ -60,7 +60,7 @@ const questionWithAnswerData = {
 describe('QuestionsService', () => {
   let service: QuestionsService;
   let prisma: any;
-  let gcsStorage: any;
+  let r2Storage: any;
   let examsService: any;
   let transaction: any;
 
@@ -99,7 +99,7 @@ describe('QuestionsService', () => {
       },
       $transaction: jest.fn((callback: (tx: any) => unknown) => callback(transaction)),
     };
-    gcsStorage = {
+    r2Storage = {
       upload: jest.fn(),
       delete: jest.fn(),
       getSignedReadUrl: jest.fn(),
@@ -111,15 +111,16 @@ describe('QuestionsService', () => {
     examsService = {
       assertStudentCanAccessExam: jest.fn(),
     };
-    service = new QuestionsService(prisma as PrismaService, gcsStorage, examsService);
+    service = new QuestionsService(prisma as PrismaService, r2Storage, examsService);
   });
 
   it('uploads an image to question storage and returns a signed reference', async () => {
-    gcsStorage.upload.mockResolvedValue({
+    r2Storage.upload.mockResolvedValue({
+      objectKey: 'questions/image-1.png',
       objectName: 'questions/image-1.png',
-      gsUri: 'gs://bucket/questions/image-1.png',
+      storageUri: 'questions/image-1.png',
     });
-    gcsStorage.getSignedReadUrl.mockResolvedValue('https://signed.example/image-1.png');
+    r2Storage.getSignedReadUrl.mockResolvedValue('https://signed.example/image-1.png');
 
     const result = await service.uploadImage({
       buffer: Buffer.from('image'),
@@ -128,30 +129,30 @@ describe('QuestionsService', () => {
       size: 5,
     });
 
-    expect(gcsStorage.upload).toHaveBeenCalledWith(
+    expect(r2Storage.upload).toHaveBeenCalledWith(
       expect.objectContaining({ originalname: 'question image.png' }),
       expect.stringMatching(/^questions\/[0-9a-f-]+-question-image\.png$/),
     );
-    expect(gcsStorage.upload).toHaveBeenCalledTimes(1);
-    expect(gcsStorage.getSignedReadUrl).toHaveBeenCalledTimes(1);
+    expect(r2Storage.upload).toHaveBeenCalledTimes(1);
+    expect(r2Storage.getSignedReadUrl).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       url: 'https://signed.example/image-1.png',
       imageUrl: 'https://signed.example/image-1.png',
-      storageUri: 'gs://bucket/questions/image-1.png',
+      storageUri: 'questions/image-1.png',
       expiresAt: expect.any(String),
     });
   });
 
-  it('waits for the GCS upload before resolving', async () => {
-    let resolveUpload!: (value: { objectName: string; gsUri: string }) => void;
-    const uploadPromise = new Promise<{ objectName: string; gsUri: string }>(
+  it('waits for the R2 upload before resolving', async () => {
+    let resolveUpload!: (value: { objectKey: string; objectName: string; storageUri: string }) => void;
+    const uploadPromise = new Promise<{ objectKey: string; objectName: string; storageUri: string }>(
       (resolve) => {
         resolveUpload = resolve;
       },
     );
     let settled = false;
-    gcsStorage.upload.mockReturnValue(uploadPromise);
-    gcsStorage.getSignedReadUrl.mockResolvedValue('https://signed.example/image.png');
+    r2Storage.upload.mockReturnValue(uploadPromise);
+    r2Storage.getSignedReadUrl.mockResolvedValue('https://signed.example/image.png');
 
     const resultPromise = service
       .uploadImage({
@@ -166,20 +167,21 @@ describe('QuestionsService', () => {
 
     await Promise.resolve();
     expect(settled).toBe(false);
-    expect(gcsStorage.upload).toHaveBeenCalledTimes(1);
+    expect(r2Storage.upload).toHaveBeenCalledTimes(1);
 
     resolveUpload({
+      objectKey: 'questions/image.png',
       objectName: 'questions/image.png',
-      gsUri: 'gs://bucket/questions/image.png',
+      storageUri: 'questions/image.png',
     });
     await expect(resultPromise).resolves.toEqual(
       expect.objectContaining({
-        storageUri: 'gs://bucket/questions/image.png',
+        storageUri: 'questions/image.png',
       }),
     );
   });
 
-  it('rejects a non-image before calling Cloud Storage', async () => {
+  it('rejects a non-image before calling R2', async () => {
     await expect(
       service.uploadImage({
         buffer: Buffer.from('not-image'),
@@ -189,7 +191,7 @@ describe('QuestionsService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(gcsStorage.upload).not.toHaveBeenCalled();
+    expect(r2Storage.upload).not.toHaveBeenCalled();
   });
 
   it('rejects an image larger than 5 MB before calling Cloud Storage', async () => {
@@ -202,7 +204,7 @@ describe('QuestionsService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
-    expect(gcsStorage.upload).not.toHaveBeenCalled();
+    expect(r2Storage.upload).not.toHaveBeenCalled();
   });
 
   it('rejects Base64 image references in question JSON', async () => {

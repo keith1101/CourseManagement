@@ -63,7 +63,7 @@ Câu hỏi multiple-choice ở vị trí 3 có `correctTextAnswer = "Lẩu Thái
 - Functions: 53.77%
 - Lines: 70.14%
 
-Coverage hiện là baseline, không dùng riêng làm tiêu chí nghiệm thu. Các vùng còn thấp gồm Attempts, Storage/GCS, Prisma bootstrap và một số controller.
+Coverage hiện là baseline, không dùng riêng làm tiêu chí nghiệm thu. Các vùng còn thấp gồm Attempts, Storage/R2, Prisma bootstrap và một số controller.
 
 ## Blocker và phạm vi chưa hoàn tất
 
@@ -71,7 +71,7 @@ Coverage hiện là baseline, không dùng riêng làm tiêu chí nghiệm thu. 
 2. Chưa chạy UI Admin và chưa chạy được nhánh Student start → answer trên một assignment còn hiệu lực; assignment test hiện tại đã quá hạn. Student UI read/result/navigation đã được xác nhận bằng agent-browser.
 3. Chưa xác nhận build metadata qua endpoint version vì backend hiện chưa expose endpoint này; script ghi nhận `SMK-002` là SKIP.
 4. Local health trả HTTP 500 với `ECONNREFUSED` từ Prisma vì database local không có listener. Docker daemon cũng chưa chạy; `.env` local có `DATABASE_URL` không hợp lệ với parser hiện tại.
-5. Chưa có staging URL trong workspace, nên chưa thực hiện được các test mutation, GCS upload/download đầy đủ và performance/security test trên staging.
+5. Chưa có staging URL trong workspace, nên chưa thực hiện được các test mutation, R2 upload/download đầy đủ và performance/security test trên staging.
 6. Dữ liệu câu hỏi nêu ở trên làm điểm của đáp án đúng theo nội dung bị chấm sai (`3/4` thay vì `4/4`).
 
 ## Kết luận nghiệm thu

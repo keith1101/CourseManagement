@@ -55,6 +55,20 @@ describe('CreateMaterialDto', () => {
     expect(invalidErrors.length).toBeGreaterThan(0);
   });
 
+  it('accepts an R2 object key for document metadata', async () => {
+    const errors = await validate(
+      plainToInstance(CreateMaterialDto, {
+        subjectId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        title: 'PDF',
+        materialType: MaterialType.PDF,
+        storageUrl: 'materials/material-1/file.pdf',
+        accessLevel: AccessLevel.FREE,
+      }),
+    );
+
+    expect(errors).toHaveLength(0);
+  });
+
   it('normalizes a YouTube watch URL before URL validation', async () => {
     const dto = plainToInstance(CreateMaterialDto, {
       subjectId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',

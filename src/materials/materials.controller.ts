@@ -23,7 +23,7 @@ import { MaterialQueryDto } from './dto/material-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { UploadMaterialDto } from './dto/upload-material.dto';
 import { MaterialsService } from './materials.service';
-import { StorageUploadFile } from '../storage/gcs-storage.service';
+import { StorageUploadFile } from '../storage/storage.types';
 
 type AuthenticatedRequest = {
   user: { sub: string; role: UserRole };

@@ -52,7 +52,7 @@ describe('QuestionsController', () => {
     expect(questionsService.uploadImage).not.toHaveBeenCalled();
   });
 
-  it('delegates an image upload and preserves a controlled GCS failure', async () => {
+  it('delegates an image upload and preserves a controlled R2 failure', async () => {
     const file = {
       buffer: Buffer.from('png'),
       originalname: 'screenshot.png',
@@ -60,7 +60,7 @@ describe('QuestionsController', () => {
       size: 3,
     };
     const failure = new InternalServerErrorException(
-      'Unable to upload file to Cloud Storage',
+      'Unable to upload file to object storage',
     );
     questionsService.uploadImage.mockRejectedValue(failure);
 

@@ -7,6 +7,253 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id                               String                   @id @default(uuid())
+  fullName                         String
+  email                            String                   @unique
+  phone                            String?
+  dateOfBirth                      DateTime?
+  passwordHash                     String
+  role                             UserRole                 @default(STUDENT)
+  isActive                         Boolean                  @default(true)
+  accessLevel                      AccessLevel              @default(FREE)
+  lastLoginAt                      DateTime?
+  proExpiresAt                     DateTime?
+  createdAt                        DateTime                 @default(now())
+  updatedAt                        DateTime                 @updatedAt
+  tokenVersion                     Int                      @default(0)
+  emailVerifiedAt                  DateTime?
+  verificationEmailLastRequestedAt DateTime?
+  verificationEmailWindowStartedAt DateTime?
+  verificationEmailRequestCount    Int                      @default(0)
+  emailVerificationTokens          EmailVerificationToken[]
+  examAssignments                  ExamAssignment[]
+  examAttempts                     ExamAttempt[]
+  subscriptions                    Subscription[]
+}
+
+model Subscription {
+  id        String    @id @default(uuid())
+  userId    String
+  startedAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model Subject {
+  id           String     @id @default(uuid())
+  code         String     @unique
+  name         String
+  description  String?
+  displayOrder Int
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  materials    Material[]
+  questions    Question[]
+}
+
+model Material {
+  id               String       @id @default(uuid())
+  subjectId        String
+  title            String
+  materialType     MaterialType
+  storageUrl       String?
+  embedUrl         String?
+  originalFileName String?
+  mimeType         String?
+  fileSizeBytes    Int?
+  accessLevel      AccessLevel
+  isPublished      Boolean      @default(false)
+  publishedAt      DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  subject          Subject      @relation(fields: [subjectId], references: [id])
+}
+
+model Exam {
+  id              String           @id @default(uuid())
+  title           String
+  description     String?
+  status          ExamStatus       @default(DRAFT)
+  accessLevel     AccessLevel      @default(FREE)
+  displayOrder    Int              @default(0)
+  publishedAt     DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  deletedAt       DateTime?
+  examAssignments ExamAssignment[]
+  examAttempts    ExamAttempt[]
+  questions       Question[]
+
+  @@index([deletedAt])
+}
+
+model Question {
+  id                      String                    @id @default(uuid())
+  examId                  String
+  questionType            QuestionType
+  contentText             String
+  imageUrl                String?
+  instruction             String?
+  explaination            String?
+  timeLimitSeconds        Int
+  correctTextAnswer       String?
+  position                Int
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  deletedAt               DateTime?
+  subjectId               String
+  hintImageUrl            String?
+  explanationImageUrl     String?
+  hint                    String?
+  attemptAnswers          AttemptAnswer[]
+  attemptQuestionProgress AttemptQuestionProgress[]
+  exam                    Exam                      @relation(fields: [examId], references: [id])
+  subject                 Subject                   @relation(fields: [subjectId], references: [id])
+  questionAcceptedAnswers QuestionAcceptedAnswer[]
+  questionOptions         QuestionOption[]
+
+  @@index([subjectId])
+}
+
+model QuestionOption {
+  id             String          @id @default(uuid())
+  questionId     String
+  contentText    String
+  isCorrect      Boolean         @default(false)
+  position       Int
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  imageUrl       String?
+  attemptAnswers AttemptAnswer[]
+  question       Question        @relation(fields: [questionId], references: [id])
+}
+
+model QuestionAcceptedAnswer {
+  id             String          @id @default(uuid())
+  questionId     String
+  answerType     AnswerValueType
+  rawValue       String
+  isPrimary      Boolean         @default(false)
+  normalizedText String?
+  content        String?
+  isCorrect      Boolean         @default(false)
+  position       Int
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  numericValue   Float?
+  question       Question        @relation(fields: [questionId], references: [id])
+}
+
+model ExamAssignment {
+  id           String        @id @default(uuid())
+  userId       String
+  examId       String
+  assignedAt   DateTime      @default(now())
+  dueAt        DateTime
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  deletedAt    DateTime?
+  exam         Exam          @relation(fields: [examId], references: [id])
+  user         User          @relation(fields: [userId], references: [id])
+  examAttempts ExamAttempt[]
+
+  @@index([userId, deletedAt])
+  @@index([examId, deletedAt])
+}
+
+model ExamAttempt {
+  id                       String                    @id @default(uuid())
+  userId                   String
+  examId                   String
+  assignmentId             String?
+  status                   AttemptStatus             @default(IN_PROGRESS)
+  submittedAt              DateTime?
+  correctCount             Int                       @default(0)
+  totalQuestions           Int
+  startedAt                DateTime                  @default(now())
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  flowVersion              Int                       @default(1)
+  progressVersion          Int                       @default(0)
+  currentAttemptQuestionId String?                   @unique
+  attemptedAnswers         AttemptAnswer[]
+  attemptQuestionProgress  AttemptQuestionProgress[] @relation("AttemptQuestionProgress")
+  assignment               ExamAssignment?           @relation(fields: [assignmentId], references: [id])
+  currentAttemptQuestion   AttemptQuestionProgress?  @relation("CurrentAttemptQuestion", fields: [currentAttemptQuestionId], references: [id])
+  exam                     Exam                      @relation(fields: [examId], references: [id])
+  user                     User                      @relation(fields: [userId], references: [id])
+}
+
+model AttemptQuestionProgress {
+  id                String                @id @default(uuid())
+  attemptId         String
+  questionId        String
+  ordinal           Int
+  timeLimitSeconds  Int
+  status            AttemptQuestionStatus @default(LOCKED)
+  activatedAt       DateTime?
+  deadlineAt        DateTime?
+  submittedAt       DateTime?
+  advanceAfter      DateTime?
+  completedAt       DateTime?
+  isCorrect         Boolean?
+  timedOut          Boolean               @default(false)
+  lastAdvanceKey    String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  examAttempt       ExamAttempt           @relation("AttemptQuestionProgress", fields: [attemptId], references: [id], onDelete: Cascade)
+  question          Question              @relation(fields: [questionId], references: [id])
+  currentForAttempt ExamAttempt?          @relation("CurrentAttemptQuestion")
+
+  @@unique([attemptId, questionId])
+  @@unique([attemptId, ordinal])
+  @@unique([attemptId, lastAdvanceKey])
+  @@index([attemptId, status])
+}
+
+model AttemptAnswer {
+  id               String          @id @default(uuid())
+  attemptId        String
+  questionId       String
+  selectedOptionId String?
+  answerType       AnswerValueType
+  rawValue         String
+  normalizedText   String?
+  content          String?
+  isCorrect        Boolean         @default(false)
+  position         Int
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  numericValue     Float?
+  submittedAt      DateTime?
+  timedOut         Boolean         @default(false)
+  submissionKey    String?
+  examAttempt      ExamAttempt     @relation(fields: [attemptId], references: [id])
+  question         Question        @relation(fields: [questionId], references: [id])
+  selectedOption   QuestionOption? @relation(fields: [selectedOptionId], references: [id])
+
+  @@unique([attemptId, submissionKey])
+  @@index([attemptId, questionId])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+}
+
 enum UserRole {
   ADMIN
   STUDENT
@@ -52,253 +299,4 @@ enum AttemptQuestionStatus {
   INCORRECT
   TIMED_OUT
   COMPLETED
-}
-
-model User {
-  id                               String                   @id @default(uuid())
-  fullName                         String
-  email                            String                   @unique
-  phone                            String?
-  dateOfBirth                      DateTime?
-  passwordHash                     String
-  tokenVersion                     Int                      @default(0)
-  role                             UserRole                 @default(STUDENT)
-  isActive                         Boolean                  @default(true)
-  accessLevel                      AccessLevel              @default(FREE)
-  lastLoginAt                      DateTime?
-  proExpiresAt                     DateTime?
-  createdAt                        DateTime                 @default(now())
-  updatedAt                        DateTime                 @updatedAt
-  emailVerifiedAt                  DateTime?
-  verificationEmailLastRequestedAt DateTime?
-  verificationEmailWindowStartedAt DateTime?
-  verificationEmailRequestCount    Int                      @default(0)
-  subscriptions                    Subscription[]
-  examAssignments                  ExamAssignment[]
-  examAttempts                     ExamAttempt[]
-  emailVerificationTokens          EmailVerificationToken[]
-}
-
-model Subscription {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id])
-  startedAt DateTime  @default(now())
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-}
-
-model Subject {
-  id           String     @id @default(uuid())
-  code         String     @unique
-  name         String
-  description  String?
-  displayOrder Int
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  materials    Material[]
-  questions    Question[]
-}
-
-model Material {
-  id               String       @id @default(uuid())
-  subjectId        String
-  subject          Subject      @relation(fields: [subjectId], references: [id])
-  title            String
-  materialType     MaterialType
-  storageUrl       String?
-  embedUrl         String?
-  originalFileName String?
-  mimeType         String?
-  fileSizeBytes    Int?
-  accessLevel      AccessLevel
-  isPublished      Boolean      @default(false)
-  publishedAt      DateTime?
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-}
-
-model Exam {
-  id              String           @id @default(uuid())
-  title           String
-  description     String?
-  status          ExamStatus       @default(DRAFT)
-  accessLevel     AccessLevel      @default(FREE)
-  displayOrder    Int              @default(0)
-  publishedAt     DateTime?
-  deletedAt       DateTime?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
-  questions       Question[]
-  examAssignments ExamAssignment[]
-  examAttempts    ExamAttempt[]
-
-  @@index([deletedAt])
-}
-
-model Question {
-  id                      String                   @id @default(uuid())
-  examId                  String
-  exam                    Exam                     @relation(fields: [examId], references: [id])
-  subjectId               String
-  subject                 Subject                  @relation(fields: [subjectId], references: [id], onDelete: Restrict)
-  questionType            QuestionType
-  contentText             String
-  imageUrl                String?
-  hintImageUrl            String?
-  hint                    String?
-  instruction             String?
-  explaination            String?
-  explanationImageUrl     String?
-  timeLimitSeconds        Int
-  // Used for SHORT_ANSWER; MULTIPLE_CHOICE uses QuestionOption.isCorrect.
-  correctTextAnswer       String?
-  position                Int
-  createdAt               DateTime                 @default(now())
-  updatedAt               DateTime                 @updatedAt
-  deletedAt               DateTime?
-  questionOptions         QuestionOption[]
-  questionAcceptedAnswers QuestionAcceptedAnswer[]
-  attemptAnswers          AttemptAnswer[]
-  attemptQuestionProgress AttemptQuestionProgress[]
-
-  @@index([subjectId])
-}
-
-model QuestionOption {
-  id             String          @id @default(uuid())
-  questionId     String
-  question       Question        @relation(fields: [questionId], references: [id])
-  contentText    String
-  imageUrl       String?
-  isCorrect      Boolean         @default(false)
-  position       Int
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  attemptAnswers AttemptAnswer[]
-}
-
-model QuestionAcceptedAnswer {
-  id         String @id @default(uuid())
-  questionId String
-
-  question       Question        @relation(fields: [questionId], references: [id])
-  answerType     AnswerValueType
-  rawValue       String
-  isPrimary      Boolean         @default(false)
-  normalizedText String?
-  content        String?
-  isCorrect      Boolean         @default(false)
-  position       Int
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
-  numericValue   Float?
-}
-
-model ExamAssignment {
-  id           String        @id @default(uuid())
-  userId       String
-  user         User          @relation(fields: [userId], references: [id])
-  examId       String
-  exam         Exam          @relation(fields: [examId], references: [id])
-  assignedAt   DateTime      @default(now())
-  dueAt        DateTime
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  deletedAt    DateTime?
-  examAttempts ExamAttempt[]
-
-  @@index([userId, deletedAt])
-  @@index([examId, deletedAt])
-}
-
-model ExamAttempt {
-  id                       String                    @id @default(uuid())
-  userId                   String
-  user                     User                      @relation(fields: [userId], references: [id])
-  examId                   String
-  exam                     Exam                      @relation(fields: [examId], references: [id])
-  assignmentId             String?
-  assignment               ExamAssignment?           @relation(fields: [assignmentId], references: [id])
-  status                   AttemptStatus              @default(IN_PROGRESS)
-  submittedAt              DateTime?
-  correctCount             Int                        @default(0)
-  totalQuestions           Int
-  flowVersion              Int                        @default(1)
-  progressVersion          Int                        @default(0)
-  currentAttemptQuestionId String?                    @unique
-  startedAt                DateTime                   @default(now())
-  createdAt                DateTime                   @default(now())
-  updatedAt                DateTime                   @updatedAt
-  attemptedAnswers         AttemptAnswer[]
-  attemptQuestionProgress  AttemptQuestionProgress[]  @relation("AttemptQuestionProgress")
-  currentAttemptQuestion   AttemptQuestionProgress?   @relation("CurrentAttemptQuestion", fields: [currentAttemptQuestionId], references: [id], onDelete: SetNull)
-}
-
-model AttemptQuestionProgress {
-  id                String                @id @default(uuid())
-  attemptId         String
-  questionId        String
-  ordinal           Int
-  timeLimitSeconds  Int
-  status            AttemptQuestionStatus @default(LOCKED)
-  activatedAt       DateTime?
-  deadlineAt        DateTime?
-  submittedAt       DateTime?
-  advanceAfter      DateTime?
-  completedAt       DateTime?
-  isCorrect         Boolean?
-  timedOut          Boolean               @default(false)
-  lastAdvanceKey    String?
-  createdAt         DateTime              @default(now())
-  updatedAt         DateTime              @updatedAt
-  examAttempt       ExamAttempt           @relation("AttemptQuestionProgress", fields: [attemptId], references: [id], onDelete: Cascade)
-  question          Question              @relation(fields: [questionId], references: [id], onDelete: Restrict)
-  currentForAttempt ExamAttempt?          @relation("CurrentAttemptQuestion")
-
-  @@unique([attemptId, questionId])
-  @@unique([attemptId, ordinal])
-  @@index([attemptId, status])
-  @@unique([attemptId, lastAdvanceKey])
-}
-
-model AttemptAnswer {
-  id               String          @id @default(uuid())
-  attemptId        String
-  examAttempt      ExamAttempt     @relation(fields: [attemptId], references: [id])
-  questionId       String
-  question         Question        @relation(fields: [questionId], references: [id])
-  selectedOptionId String?
-  selectedOption   QuestionOption? @relation(fields: [selectedOptionId], references: [id])
-  answerType       AnswerValueType
-  rawValue         String
-  normalizedText   String?
-  content          String?
-  isCorrect        Boolean         @default(false)
-  submittedAt      DateTime?
-  timedOut         Boolean         @default(false)
-  submissionKey    String?
-  position         Int
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
-  numericValue     Float?
-  @@index([attemptId, questionId])
-  @@unique([attemptId, submissionKey])
-}
-
-model EmailVerificationToken {
-  id        String    @id @default(uuid())
-  userId    String
-  tokenHash String    @unique
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@index([expiresAt])
 }

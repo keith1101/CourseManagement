@@ -302,8 +302,7 @@ async function main() {
             subjectId: IDS.subjects.math,
             title: 'Ôn tập phân số và phương trình cơ bản',
             materialType: MaterialType.PDF,
-            storageUrl:
-              'https://storage.googleapis.com/course-management-materials/math/on-tap-phan-so-va-phuong-trinh.pdf',
+            storageUrl: null,
             embedUrl: null,
             originalFileName: 'on-tap-phan-so-va-phuong-trinh.pdf',
             mimeType: 'application/pdf',
@@ -317,8 +316,7 @@ async function main() {
             subjectId: IDS.subjects.science,
             title: 'Chuyên đề quang hợp và trao đổi chất',
             materialType: MaterialType.PDF,
-            storageUrl:
-              'https://storage.googleapis.com/course-management-materials/science/quang-hop-va-trao-doi-chat.pdf',
+            storageUrl: null,
             embedUrl: null,
             originalFileName: 'quang-hop-va-trao-doi-chat.pdf',
             mimeType: 'application/pdf',
@@ -332,8 +330,7 @@ async function main() {
             subjectId: IDS.subjects.history,
             title: 'Mốc thời gian lịch sử Việt Nam thế kỷ XX',
             materialType: MaterialType.DOCX,
-            storageUrl:
-              'https://storage.googleapis.com/course-management-materials/history/moc-thoi-gian-lich-su-viet-nam.docx',
+            storageUrl: null,
             embedUrl: null,
             originalFileName: 'moc-thoi-gian-lich-su-viet-nam.docx',
             mimeType:
@@ -348,8 +345,7 @@ async function main() {
             subjectId: IDS.subjects.geography,
             title: 'Bản đồ các vùng kinh tế Việt Nam',
             materialType: MaterialType.PDF,
-            storageUrl:
-              'https://storage.googleapis.com/course-management-materials/geography/cac-vung-kinh-te-viet-nam.pdf',
+            storageUrl: null,
             embedUrl: null,
             originalFileName: 'cac-vung-kinh-te-viet-nam.pdf',
             mimeType: 'application/pdf',
@@ -377,8 +373,7 @@ async function main() {
             subjectId: IDS.subjects.vietnamese,
             title: 'Ôn tập từ đồng nghĩa và trái nghĩa',
             materialType: MaterialType.PDF,
-            storageUrl:
-              'https://storage.googleapis.com/course-management-materials/vietnamese/tu-dong-nghia-trai-nghia.pdf',
+            storageUrl: null,
             embedUrl: null,
             originalFileName: 'tu-dong-nghia-trai-nghia.pdf',
             mimeType: 'application/pdf',

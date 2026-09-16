@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
-import { GcsStorageModule } from '../storage/gcs-storage.module';
+import { R2StorageModule } from '../storage/r2-storage.module';
 import { MaterialsController } from './materials.controller';
 import { MaterialsService } from './materials.service';
 
 @Module({
-  imports: [GcsStorageModule],
+  imports: [R2StorageModule],
   controllers: [MaterialsController],
   providers: [MaterialsService],
 })

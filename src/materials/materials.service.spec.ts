@@ -116,11 +116,12 @@ describe('MaterialsService', () => {
     );
   });
 
-  it('uploads a PDF to Cloud Storage and saves its metadata', async () => {
+  it('uploads a PDF to R2 and saves its object key metadata', async () => {
     prisma.subject.findUnique.mockResolvedValue(activeSubject);
     gcsStorage.upload.mockResolvedValue({
-      objectName: 'materials/subject-1/file.pdf',
-      gsUri: 'gs://course-media-bucket/materials/subject-1/file.pdf',
+      objectKey: 'materials/material-1/file.pdf',
+      objectName: 'materials/material-1/file.pdf',
+      storageUri: 'materials/material-1/file.pdf',
     });
     prisma.material.create.mockResolvedValue(pdf);
 
@@ -140,12 +141,12 @@ describe('MaterialsService', () => {
 
     expect(gcsStorage.upload).toHaveBeenCalledWith(
       expect.objectContaining({ originalname: 'lesson.pdf' }),
-      expect.stringMatching(/^materials\/subject-1\//),
+      expect.stringMatching(/^materials\/[0-9a-f-]+\/lesson\.pdf$/),
     );
     expect(prisma.material.create.mock.calls[0][0].data).toEqual(
       expect.objectContaining({
         materialType: MaterialType.PDF,
-        storageUrl: 'gs://course-media-bucket/materials/subject-1/file.pdf',
+        storageUrl: 'materials/material-1/file.pdf',
         fileSizeBytes: 3,
       }),
     );
@@ -418,8 +419,8 @@ describe('MaterialsService', () => {
     );
   });
 
-  it('deletes a Cloud Storage object before deleting its material record', async () => {
-    const storageUrl = 'gs://course-media-bucket/materials/subject-1/file.pdf';
+  it('deletes an R2 object before deleting its material record', async () => {
+    const storageUrl = 'materials/material-1/file.pdf';
     prisma.material.findUnique.mockResolvedValueOnce({
       id: 'material-1',
       storageUrl,

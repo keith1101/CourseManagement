@@ -12,10 +12,8 @@ import { CreateMaterialDto } from './dto/create-material.dto';
 import { MaterialQueryDto } from './dto/material-query.dto';
 import { UpdateMaterialDto } from './dto/update-material.dto';
 import { UploadMaterialDto } from './dto/upload-material.dto';
-import {
-  GcsStorageService,
-  StorageUploadFile,
-} from '../storage/gcs-storage.service';
+import { R2StorageService } from '../storage/r2-storage.service';
+import { StorageUploadFile } from '../storage/storage.types';
 import { randomUUID } from 'node:crypto';
 import { normalizeYoutubeEmbedUrl } from './youtube-url';
 
@@ -50,7 +48,7 @@ type MaterialShape = {
 export class MaterialsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly gcsStorage: GcsStorageService,
+    private readonly r2Storage: R2StorageService,
   ) {}
 
   async create(createMaterialDto: CreateMaterialDto) {
@@ -70,7 +68,7 @@ export class MaterialsService {
     this.validateShape(shape);
 
     try {
-      return await this.prisma.material.create({
+      const material = await this.prisma.material.create({
         data: {
           subjectId: createMaterialDto.subjectId,
           title,
@@ -86,6 +84,7 @@ export class MaterialsService {
         },
         include: materialInclude,
       });
+      return this.withMaterialMedia(material);
     } catch (error) {
       this.handlePrismaError(error);
     }
@@ -98,17 +97,22 @@ export class MaterialsService {
     if (!title) throw new BadRequestException('Title cannot be empty');
 
     const materialType = this.detectUploadedMaterialType(file);
+    // Generate the material id before uploading so the persisted key is
+    // deterministic and scoped to the material: materials/{id}/file.ext.
+    const materialId = randomUUID();
     const safeFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
-    const objectName = `materials/${uploadMaterialDto.subjectId}/${randomUUID()}-${safeFileName || 'file'}`;
-    const uploaded = await this.gcsStorage.upload(file, objectName);
+    const objectName = `materials/${materialId}/${safeFileName || 'file'}`;
+    const uploaded = await this.r2Storage.upload(file, objectName);
+    const objectKey = this.uploadedObjectKey(uploaded);
 
     try {
-      return await this.prisma.material.create({
+      const material = await this.prisma.material.create({
         data: {
+          id: materialId,
           subjectId: uploadMaterialDto.subjectId,
           title,
           materialType,
-          storageUrl: uploaded.gsUri,
+          storageUrl: objectKey,
           embedUrl: null,
           originalFileName: file.originalname,
           mimeType: file.mimetype,
@@ -119,8 +123,9 @@ export class MaterialsService {
         },
         include: materialInclude,
       });
+      return this.withMaterialMedia(material);
     } catch (error) {
-      await this.gcsStorage.delete(uploaded.gsUri).catch(() => undefined);
+      await this.r2Storage.delete(objectKey).catch(() => undefined);
       this.handlePrismaError(error);
     }
   }
@@ -133,11 +138,12 @@ export class MaterialsService {
     if (query.accessLevel) where.accessLevel = query.accessLevel;
 
     if (viewer.role === UserRole.ADMIN) {
-      return this.prisma.material.findMany({
+      const materials = await this.prisma.material.findMany({
         where,
         include: materialInclude,
         orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
       });
+      return Promise.all(materials.map((material) => this.withMaterialMedia(material)));
     }
 
     const access = await this.getStudentAccess(viewer.userId);
@@ -145,11 +151,12 @@ export class MaterialsService {
     where.subject = { isActive: true };
     if (!access.isPro) where.accessLevel = AccessLevel.FREE;
 
-    return this.prisma.material.findMany({
+    const materials = await this.prisma.material.findMany({
       where,
       include: materialInclude,
       orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
     });
+    return Promise.all(materials.map((material) => this.withMaterialMedia(material)));
   }
 
   async findOne(id: string, viewer: Viewer) {
@@ -163,7 +170,7 @@ export class MaterialsService {
         : await this.findStudentMaterial(id, viewer.userId, query);
 
     if (!material) throw new NotFoundException('Material not found');
-    return material;
+    return this.withMaterialMedia(material);
   }
 
   async getDownloadUrl(id: string, viewer: Viewer) {
@@ -177,13 +184,16 @@ export class MaterialsService {
     }
 
     const expiresInSeconds = 15 * 60;
-    const url = await this.gcsStorage.getSignedReadUrl(
+    const resolved = await this.r2Storage.resolveReadUrl(
       material.storageUrl,
       expiresInSeconds,
     );
+    if (!resolved.url) {
+      throw new NotFoundException('Download is not available for this material');
+    }
 
     return {
-      url,
+      url: resolved.url,
       expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
     };
   }
@@ -215,7 +225,7 @@ export class MaterialsService {
     if (!title) throw new BadRequestException('Title cannot be empty');
 
     try {
-      return await this.prisma.material.update({
+      const material = await this.prisma.material.update({
         where: { id },
         data: {
           subjectId,
@@ -230,6 +240,7 @@ export class MaterialsService {
         },
         include: materialInclude,
       });
+      return this.withMaterialMedia(material);
     } catch (error) {
       this.handlePrismaError(error);
     }
@@ -263,11 +274,12 @@ export class MaterialsService {
     this.validateShape(material);
 
     try {
-      return await this.prisma.material.update({
+      const published = await this.prisma.material.update({
         where: { id },
         data: { isPublished: true, publishedAt: new Date() },
         include: materialInclude,
       });
+      return this.withMaterialMedia(published);
     } catch (error) {
       this.handlePrismaError(error);
     }
@@ -285,11 +297,12 @@ export class MaterialsService {
     }
 
     try {
-      return await this.prisma.material.update({
+      const unpublished = await this.prisma.material.update({
         where: { id },
         data: { isPublished: false, publishedAt: null },
         include: materialInclude,
       });
+      return this.withMaterialMedia(unpublished);
     } catch (error) {
       this.handlePrismaError(error);
     }
@@ -302,8 +315,8 @@ export class MaterialsService {
     });
     if (!existing) throw new NotFoundException('Material not found');
 
-    if (existing.storageUrl?.startsWith('gs://')) {
-      await this.gcsStorage.delete(existing.storageUrl);
+    if (this.isManagedStorageReference(existing.storageUrl)) {
+      await this.r2Storage.delete(existing.storageUrl);
     }
 
     try {
@@ -374,7 +387,11 @@ export class MaterialsService {
 
     // Document types use storageUrl as their source. Any stale embed metadata
     // is cleared so a type change cannot leave contradictory state behind.
-    return { ...shape, embedUrl: null };
+    return {
+      ...shape,
+      embedUrl: null,
+      storageUrl: this.normalizeStorageReference(shape.storageUrl),
+    };
   }
 
   private validateShape(shape: MaterialShape) {
@@ -425,7 +442,72 @@ export class MaterialsService {
   }
 
   private isStorageUrl(value: string | null | undefined) {
-    return this.isHttpUrl(value) || /^gs:\/\/[^/]+\/.+/.test(value ?? '');
+    return this.isHttpUrl(value) || this.isManagedStorageReference(value);
+  }
+
+  private async withMaterialMedia<T extends {
+    materialType?: MaterialType;
+    storageUrl?: string | null;
+  }>(material: T) {
+    if (
+      !material.storageUrl ||
+      material.materialType === MaterialType.EMBEDDED_VIDEO
+    ) {
+      return material;
+    }
+
+    const resolveReadUrl = (this.r2Storage as any).resolveReadUrl;
+    if (typeof resolveReadUrl !== 'function') return material;
+
+    const resolved = await resolveReadUrl.call(this.r2Storage, material.storageUrl);
+    return {
+      ...material,
+      // A GCS reference resolves to null because old objects are not migrated.
+      storageUrl: resolved.url,
+    };
+  }
+
+  private normalizeStorageReference(value: string | null | undefined) {
+    if (!value) return value ?? null;
+    if (this.isLegacyGcsReference(value)) return null;
+
+    const toObjectKey = (this.r2Storage as any).toObjectKey;
+    if (typeof toObjectKey === 'function') {
+      const key = toObjectKey.call(this.r2Storage, value);
+      if (key) return key;
+    }
+
+    // Preserve explicitly external URLs for existing admin-created records;
+    // all upload paths above persist an R2 key.
+    return value.trim();
+  }
+
+  private isManagedStorageReference(value: string | null | undefined) {
+    if (!value || this.isLegacyGcsReference(value)) return false;
+    const isManaged = (this.r2Storage as any).isManagedObjectKey;
+    if (typeof isManaged === 'function') {
+      return Boolean(isManaged.call(this.r2Storage, value));
+    }
+    return !this.isHttpUrl(value) && value.includes('/');
+  }
+
+  private isLegacyGcsReference(value: string) {
+    return (
+      value.startsWith('gs://') ||
+      /^https?:\/\/(?:storage\.googleapis\.com|storage\.cloud\.google\.com)\//i.test(
+        value,
+      )
+    );
+  }
+
+  private uploadedObjectKey(uploaded: {
+    objectKey?: string;
+    objectName?: string;
+    storageUri?: string;
+  }) {
+    const key = uploaded.objectKey ?? uploaded.storageUri ?? uploaded.objectName;
+    if (key) return key;
+    throw new BadRequestException('Storage upload did not return an object key');
   }
 
   private detectUploadedMaterialType(file: StorageUploadFile) {

@@ -13,7 +13,7 @@ import {
 } from '../../generated/client/enums';
 import { Prisma } from '../../generated/client/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { GcsStorageService } from '../storage/gcs-storage.service';
+import { R2StorageService } from '../storage/r2-storage.service';
 import { AttemptQueryDto } from './dto/attempt-query.dto';
 import { SaveAttemptAnswerDto } from './dto/save-attempt-answer.dto';
 import { StartAttemptDto } from './dto/start-attempt.dto';
@@ -192,7 +192,7 @@ const sequentialQuestionEvaluationSelect = {
 export class AttemptsService {
     constructor(
         private readonly prisma: PrismaService,
-        private readonly gcsStorage: GcsStorageService,
+        private readonly r2Storage: R2StorageService,
     ) {}
 
     /**
@@ -1647,8 +1647,8 @@ export class AttemptsService {
 
     private async resolveOptionalMedia(value: string | null | undefined) {
         if (!value) return null;
-        const resolved = await this.gcsStorage.resolveReadUrl(value);
-        return resolved.url ?? value;
+        const resolved = await this.r2Storage.resolveReadUrl(value);
+        return resolved.url;
     }
 
     private async getAttempt(id: string, userId?: string) {
@@ -1714,10 +1714,10 @@ export class AttemptsService {
     ) {
         if (!option.imageUrl) return option;
 
-        const resolved = await this.gcsStorage.resolveReadUrl(option.imageUrl);
+        const resolved = await this.r2Storage.resolveReadUrl(option.imageUrl);
         return {
             ...option,
-            imageUrl: resolved.url ?? option.imageUrl,
+            imageUrl: resolved.url,
             ...(resolved.storageUri
                 ? { imageStorageUri: resolved.storageUri }
                 : {}),
@@ -1725,17 +1725,17 @@ export class AttemptsService {
     }
 
     private async withQuestionMedia<T extends StudentQuestion>(question: T) {
-        const mediaFields: Record<string, string> = {};
+        const mediaFields: Record<string, string | null> = {};
 
         if (question.imageUrl) {
-            const resolved = await this.gcsStorage.resolveReadUrl(question.imageUrl);
-            mediaFields.imageUrl = resolved.url ?? question.imageUrl;
+            const resolved = await this.r2Storage.resolveReadUrl(question.imageUrl);
+            mediaFields.imageUrl = resolved.url;
             if (resolved.storageUri) mediaFields.imageStorageUri = resolved.storageUri;
         }
 
         if (question.hintImageUrl) {
-            const resolved = await this.gcsStorage.resolveReadUrl(question.hintImageUrl);
-            mediaFields.hintImageUrl = resolved.url ?? question.hintImageUrl;
+            const resolved = await this.r2Storage.resolveReadUrl(question.hintImageUrl);
+            mediaFields.hintImageUrl = resolved.url;
             if (resolved.storageUri) mediaFields.hintImageStorageUri = resolved.storageUri;
         }
 

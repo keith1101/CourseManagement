@@ -21,7 +21,7 @@ import { QuestionsService } from './questions.service';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
 import { UpdateQuestionOrderDto } from './dto/update-question-order.dto';
 import { CreateQuestionOptionDto, UpdateQuestionOptionDto } from './dto/question-option.dto';
-import { StorageUploadFile } from '../storage/gcs-storage.service';
+import { StorageUploadFile } from '../storage/storage.types';
 
 type AuthenticatedRequest = {
     user: { role: UserRole };

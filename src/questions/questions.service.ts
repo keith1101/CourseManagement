@@ -8,10 +8,8 @@ import {
 import { randomUUID } from 'crypto';
 import { QuestionType } from '../../generated/client/enums';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-    GcsStorageService,
-    StorageUploadFile,
-} from '../storage/gcs-storage.service';
+import { R2StorageService } from '../storage/r2-storage.service';
+import { StorageUploadFile } from '../storage/storage.types';
 import { CreateQuestionDto } from './dto/create-question.dto';
 import { UpdateQuestionsDto } from './dto/update-questions.dto';
 import { CreateQuestionOptionDto, UpdateQuestionOptionDto } from './dto/question-option.dto';
@@ -50,7 +48,7 @@ type AnswerKeyOption = {
 export class QuestionsService {
     constructor(
         private readonly prismaService: PrismaService,
-        private readonly gcsStorage: GcsStorageService,
+        private readonly r2Storage: R2StorageService,
         private readonly examsService: ExamsService,
     ) {}
 
@@ -65,18 +63,21 @@ export class QuestionsService {
 
         const safeFileName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '-');
         const objectName = `questions/${randomUUID()}-${safeFileName || 'image'}`;
-        const uploaded = await this.gcsStorage.upload(file, objectName);
+        const uploaded = await this.r2Storage.upload(file, objectName);
+        const objectKey = this.uploadedObjectKey(uploaded);
 
         try {
-            const url = await this.gcsStorage.getSignedReadUrl(uploaded.gsUri);
+            const url = await this.r2Storage.getSignedReadUrl(objectKey);
             return {
                 url,
                 imageUrl: url,
-                storageUri: uploaded.gsUri,
+                // Keep returning storageUri for existing admin clients, but
+                // make it the durable R2 key rather than a signed URL.
+                storageUri: objectKey,
                 expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
             };
         } catch (error) {
-            await this.gcsStorage.delete(uploaded.gsUri).catch(() => undefined);
+            await this.r2Storage.delete(objectKey).catch(() => undefined);
             throw error;
         }
     }
@@ -128,12 +129,14 @@ export class QuestionsService {
                     subjectId: createQuestionDto.subjectId,
                     questionType: createQuestionDto.questionType,
                     contentText: createQuestionDto.contentText,
-                    imageUrl: createQuestionDto.imageUrl,
-                    hintImageUrl: createQuestionDto.hintImageUrl,
+                    imageUrl: this.normalizeImageReference(createQuestionDto.imageUrl),
+                    hintImageUrl: this.normalizeImageReference(createQuestionDto.hintImageUrl),
                     hint: createQuestionDto.hint,
                     instruction: createQuestionDto.instruction,
                     explaination: createQuestionDto.explaination,
-                    explanationImageUrl: createQuestionDto.explanationImageUrl,
+                    explanationImageUrl: this.normalizeImageReference(
+                        createQuestionDto.explanationImageUrl,
+                    ),
                     timeLimitSeconds: createQuestionDto.timeLimitSeconds,
                     correctTextAnswer: createQuestionDto.correctTextAnswer,
                     position,
@@ -145,7 +148,7 @@ export class QuestionsService {
                     data: createQuestionDto.options.map((opt, index) => ({
                         questionId: question.id,
                         contentText: opt.contentText,
-                        imageUrl: opt.imageUrl,
+                        imageUrl: this.normalizeImageReference(opt.imageUrl),
                         isCorrect: opt.isCorrect ?? false,
                         position: opt.position ?? index,
                     })),
@@ -321,9 +324,30 @@ export class QuestionsService {
         return this.prismaService.$transaction(async (transaction) => {
             const { options, ...questionData } = updateQuestionsDto;
 
+            const normalizedQuestionData = {
+                ...questionData,
+                ...(questionData.imageUrl !== undefined
+                    ? { imageUrl: this.normalizeImageReference(questionData.imageUrl) }
+                    : {}),
+                ...(questionData.hintImageUrl !== undefined
+                    ? {
+                          hintImageUrl: this.normalizeImageReference(
+                              questionData.hintImageUrl,
+                          ),
+                      }
+                    : {}),
+                ...(questionData.explanationImageUrl !== undefined
+                    ? {
+                          explanationImageUrl: this.normalizeImageReference(
+                              questionData.explanationImageUrl,
+                          ),
+                      }
+                    : {}),
+            };
+
             await transaction.question.update({
                 where: { id },
-                data: questionData,
+                data: normalizedQuestionData,
             });
 
             if (options !== undefined) {
@@ -337,7 +361,7 @@ export class QuestionsService {
                         data: options.map((opt, index) => ({
                             questionId: id,
                             contentText: opt.contentText,
-                            imageUrl: opt.imageUrl,
+                            imageUrl: this.normalizeImageReference(opt.imageUrl),
                             isCorrect: opt.isCorrect ?? false,
                             position: opt.position ?? index,
                         })),
@@ -448,6 +472,11 @@ export class QuestionsService {
                 deletedAt: null,
                 exam: { is: { deletedAt: null } },
             },
+            include: {
+                questionOptions: {
+                    select: { imageUrl: true },
+                },
+            },
         });
 
         if (!question) {
@@ -462,7 +491,7 @@ export class QuestionsService {
             throw new ConflictException('Questions can only be changed in a draft exam');
         }
 
-        return this.prismaService.$transaction(async (transaction) => {
+        const deletedQuestion = await this.prismaService.$transaction(async (transaction) => {
             const deletedQuestion = await transaction.question.update({
                 where: { id },
                 data: { deletedAt: new Date() },
@@ -485,6 +514,17 @@ export class QuestionsService {
 
             return deletedQuestion;
         });
+
+        await Promise.all([
+            this.deleteManagedObject(question.imageUrl),
+            this.deleteManagedObject(question.hintImageUrl),
+            this.deleteManagedObject(question.explanationImageUrl),
+            ...(question.questionOptions ?? []).map((option) =>
+                this.deleteManagedObject(option.imageUrl),
+            ),
+        ]);
+
+        return deletedQuestion;
     }
 
     // QuestionOption sub-resource methods
@@ -518,7 +558,7 @@ export class QuestionsService {
             data: {
                 questionId,
                 contentText: dto.contentText,
-                imageUrl: dto.imageUrl,
+                imageUrl: this.normalizeImageReference(dto.imageUrl),
                 isCorrect: dto.isCorrect ?? false,
                 position,
             },
@@ -534,6 +574,7 @@ export class QuestionsService {
             select: {
                 id: true,
                 isCorrect: true,
+                imageUrl: true,
                 question: {
                     select: {
                         examId: true,
@@ -580,7 +621,12 @@ export class QuestionsService {
 
         const updatedOption = await this.prismaService.questionOption.update({
             where: { id: optionId },
-            data: dto,
+            data: {
+                ...dto,
+                ...(dto.imageUrl !== undefined
+                    ? { imageUrl: this.normalizeImageReference(dto.imageUrl) }
+                    : {}),
+            },
         });
 
         return this.withOptionMedia(updatedOption);
@@ -592,6 +638,7 @@ export class QuestionsService {
             select: {
                 id: true,
                 isCorrect: true,
+                imageUrl: true,
                 question: {
                     select: {
                         examId: true,
@@ -632,9 +679,12 @@ export class QuestionsService {
             ),
         );
 
-        return this.prismaService.questionOption.delete({
+        const deletedOption = await this.prismaService.questionOption.delete({
             where: { id: optionId },
         });
+
+        await this.deleteManagedObject(option.imageUrl);
+        return deletedOption;
     }
 
     private async ensureActiveSubject(subjectId: string) {
@@ -667,7 +717,9 @@ export class QuestionsService {
             throw new BadRequestException('Image URL cannot exceed 2048 characters');
         }
 
-        if (value.startsWith('gs://')) return;
+        if (this.isManagedImageReference(value) || this.isLegacyGcsReference(value)) {
+            return;
+        }
 
         if (value.startsWith('data:')) {
             throw new BadRequestException(
@@ -690,7 +742,7 @@ export class QuestionsService {
     ) {
         if (!option.imageUrl) return option;
 
-        const resolved = await this.gcsStorage.resolveReadUrl(option.imageUrl);
+        const resolved = await this.r2Storage.resolveReadUrl(option.imageUrl);
         return {
             ...option,
             imageUrl: resolved.url,
@@ -708,25 +760,25 @@ export class QuestionsService {
             questionOptions?: Array<{ imageUrl?: string | null }>;
         },
     >(question: T) {
-        const mediaFields: Record<string, string> = {};
+        const mediaFields: Record<string, string | null> = {};
 
         if (question.imageUrl) {
-            const resolved = await this.gcsStorage.resolveReadUrl(question.imageUrl);
-            mediaFields.imageUrl = resolved.url ?? question.imageUrl;
+            const resolved = await this.r2Storage.resolveReadUrl(question.imageUrl);
+            mediaFields.imageUrl = resolved.url;
             if (resolved.storageUri) mediaFields.imageStorageUri = resolved.storageUri;
         }
 
         if (question.hintImageUrl) {
-            const resolved = await this.gcsStorage.resolveReadUrl(question.hintImageUrl);
-            mediaFields.hintImageUrl = resolved.url ?? question.hintImageUrl;
+            const resolved = await this.r2Storage.resolveReadUrl(question.hintImageUrl);
+            mediaFields.hintImageUrl = resolved.url;
             if (resolved.storageUri) mediaFields.hintImageStorageUri = resolved.storageUri;
         }
 
         if (question.explanationImageUrl) {
-            const resolved = await this.gcsStorage.resolveReadUrl(
+            const resolved = await this.r2Storage.resolveReadUrl(
                 question.explanationImageUrl,
             );
-            mediaFields.explanationImageUrl = resolved.url ?? question.explanationImageUrl;
+            mediaFields.explanationImageUrl = resolved.url;
             if (resolved.storageUri) {
                 mediaFields.explanationImageStorageUri = resolved.storageUri;
             }
@@ -743,6 +795,58 @@ export class QuestionsService {
                   )
                 : question.questionOptions,
         };
+    }
+
+    private normalizeImageReference(reference?: string | null) {
+        if (!reference) return reference ?? null;
+        const value = reference.trim();
+        if (this.isLegacyGcsReference(value)) return null;
+
+        const toObjectKey = (this.r2Storage as any).toObjectKey;
+        if (typeof toObjectKey === 'function') {
+            const key = toObjectKey.call(this.r2Storage, value);
+            if (key) return key;
+        }
+
+        // Existing external URLs remain readable for backwards compatibility;
+        // all newly uploaded media returns a key and is normalized above.
+        return value;
+    }
+
+    private isManagedImageReference(value: string) {
+        const isManaged = (this.r2Storage as any).isManagedObjectKey;
+        if (typeof isManaged === 'function') {
+            return Boolean(isManaged.call(this.r2Storage, value));
+        }
+        return (
+            !/^https?:\/\//i.test(value) &&
+            !value.includes('://') &&
+            value.includes('/')
+        );
+    }
+
+    private isLegacyGcsReference(value: string) {
+        return (
+            value.startsWith('gs://') ||
+            /^https?:\/\/(?:storage\.googleapis\.com|storage\.cloud\.google\.com)\//i.test(
+                value,
+            )
+        );
+    }
+
+  private uploadedObjectKey(uploaded: {
+        objectKey?: string;
+        objectName?: string;
+        storageUri?: string;
+    }) {
+        const key = uploaded.objectKey ?? uploaded.storageUri ?? uploaded.objectName;
+        if (key) return key;
+        throw new BadRequestException('Storage upload did not return an object key');
+    }
+
+    private async deleteManagedObject(reference?: string | null) {
+        if (!reference || !this.isManagedImageReference(reference)) return;
+        await this.r2Storage.delete(reference);
     }
 
     private validateAnswerKey(

@@ -2,7 +2,7 @@
 
 ## Mục tiêu
 
-Xác nhận release đã deploy hoạt động đúng qua các boundary frontend → API → PostgreSQL/Google Cloud Storage và đủ điều kiện nghiệm thu.
+Xác nhận release đã deploy hoạt động đúng qua các boundary frontend → API → PostgreSQL/Cloudflare R2 và đủ điều kiện nghiệm thu.
 
 ## Chiến lược
 

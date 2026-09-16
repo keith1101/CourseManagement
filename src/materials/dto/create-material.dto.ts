@@ -33,7 +33,6 @@ export class CreateMaterialDto {
   @ValidateIf((object) => documentMaterial(object.materialType))
   @IsString()
   @IsNotEmpty()
-  @IsUrl({ require_protocol: true })
   storageUrl?: string;
 
   @ValidateIf((object) => object.materialType === MaterialType.EMBEDDED_VIDEO)
