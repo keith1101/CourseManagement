@@ -12,6 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import { QuestionType } from '../../../generated/client/enums';
 import { QuestionOptionDto } from './question-option.dto';
+import { QuestionPartDto } from './question-part.dto';
 
 export class CreateQuestionDto {
     @IsUUID()
@@ -61,4 +62,10 @@ export class CreateQuestionDto {
     @ValidateNested({ each: true })
     @Type(() => QuestionOptionDto)
     options?: QuestionOptionDto[];
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => QuestionPartDto)
+    parts?: QuestionPartDto[];
 }

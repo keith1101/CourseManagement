@@ -1,6 +1,15 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsNumber, IsOptional, IsString, MinLength, ValidateNested } from 'class-validator';
 import { AnswerValueType } from '../../../generated/client/enums';
+
+export class SaveAttemptPartAnswerDto {
+    @IsString()
+    @MinLength(1)
+    partId!: string;
+
+    @IsString()
+    rawValue!: string;
+}
 
 export class SaveAttemptAnswerDto {
     @IsString()
@@ -39,4 +48,10 @@ export class SaveAttemptAnswerDto {
     @IsOptional()
     @IsBoolean()
     finalize?: boolean;
+
+    @IsOptional()
+    @IsArray()
+    @ValidateNested({ each: true })
+    @Type(() => SaveAttemptPartAnswerDto)
+    parts?: SaveAttemptPartAnswerDto[];
 }

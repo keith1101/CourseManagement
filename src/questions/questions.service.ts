@@ -37,6 +37,9 @@ const questionInclude = {
             position: 'asc' as const,
         },
     },
+    questionParts: {
+        orderBy: { position: 'asc' as const },
+    },
 } as const;
 
 type AnswerKeyOption = {
@@ -113,6 +116,7 @@ export class QuestionsService {
             createQuestionDto.questionType,
             createQuestionDto.correctTextAnswer,
             createQuestionDto.options ?? [],
+            createQuestionDto.parts ?? [],
         );
 
         return this.prismaService.$transaction(async (transaction) => {
@@ -151,6 +155,17 @@ export class QuestionsService {
                         imageUrl: this.normalizeImageReference(opt.imageUrl),
                         isCorrect: opt.isCorrect ?? false,
                         position: opt.position ?? index,
+                    })),
+                });
+            }
+
+            if (createQuestionDto.parts && createQuestionDto.parts.length > 0) {
+                await transaction.questionPart.createMany({
+                    data: createQuestionDto.parts.map((part, index) => ({
+                        questionId: question.id,
+                        contentText: part.contentText.trim(),
+                        correctAnswer: part.correctAnswer.trim(),
+                        position: part.position ?? index,
                     })),
                 });
             }
@@ -317,12 +332,16 @@ export class QuestionsService {
             updateQuestionsDto.options !== undefined
                 ? updateQuestionsDto.options
                 : existing.questionOptions;
+        const parts =
+            updateQuestionsDto.parts !== undefined
+                ? updateQuestionsDto.parts
+                : existing.questionParts;
 
         this.validateImageReferences(updateQuestionsDto);
-        this.validateAnswerKey(questionType, correctTextAnswer, options);
+        this.validateAnswerKey(questionType, correctTextAnswer, options, parts);
 
         return this.prismaService.$transaction(async (transaction) => {
-            const { options, ...questionData } = updateQuestionsDto;
+            const { options, parts, ...questionData } = updateQuestionsDto;
 
             const normalizedQuestionData = {
                 ...questionData,
@@ -364,6 +383,20 @@ export class QuestionsService {
                             imageUrl: this.normalizeImageReference(opt.imageUrl),
                             isCorrect: opt.isCorrect ?? false,
                             position: opt.position ?? index,
+                        })),
+                    });
+                }
+            }
+
+            if (parts !== undefined) {
+                await transaction.questionPart.deleteMany({ where: { questionId: id } });
+                if (parts.length > 0) {
+                    await transaction.questionPart.createMany({
+                        data: parts.map((part, index) => ({
+                            questionId: id,
+                            contentText: part.contentText.trim(),
+                            correctAnswer: part.correctAnswer.trim(),
+                            position: part.position ?? index,
                         })),
                     });
                 }
@@ -814,6 +847,10 @@ export class QuestionsService {
     }
 
     private isManagedImageReference(value: string) {
+        // A clipboard/Base64 payload such as `data:image/png;base64,...` also
+        // contains `/`.  It must never be mistaken for an internal object key.
+        if (value.startsWith('data:')) return false;
+
         const isManaged = (this.r2Storage as any).isManagedObjectKey;
         if (typeof isManaged === 'function') {
             return Boolean(isManaged.call(this.r2Storage, value));
@@ -853,11 +890,18 @@ export class QuestionsService {
         questionType: QuestionType,
         correctTextAnswer: string | null | undefined,
         options: ReadonlyArray<AnswerKeyOption>,
+        parts: ReadonlyArray<{ contentText: string; correctAnswer: string }> = [],
     ) {
         if (questionType === QuestionType.MULTIPLE_CHOICE) {
             if (correctTextAnswer?.trim()) {
                 throw new BadRequestException(
                     'Multiple-choice questions must use options instead of correctTextAnswer',
+                );
+            }
+
+            if (parts.length > 0) {
+                throw new BadRequestException(
+                    'Multiple-choice questions cannot contain parts',
                 );
             }
 
@@ -882,11 +926,29 @@ export class QuestionsService {
 
         if (
             questionType === QuestionType.SHORT_ANSWER &&
-            options.length > 0
+            (options.length > 0 || parts.length > 0)
         ) {
             throw new BadRequestException(
                 'Short-answer questions cannot contain options',
             );
+        }
+
+        if (questionType === QuestionType.MULTI_PART_SHORT_ANSWER) {
+            if (correctTextAnswer?.trim() || options.length > 0) {
+                throw new BadRequestException(
+                    'Multi-part short-answer questions must use parts only',
+                );
+            }
+            if (parts.length === 0) {
+                throw new BadRequestException(
+                    'Multi-part short-answer questions require at least one part',
+                );
+            }
+            if (parts.some((part) => !part.contentText?.trim() || !part.correctAnswer?.trim())) {
+                throw new BadRequestException(
+                    'Every question part requires contentText and correctAnswer',
+                );
+            }
         }
     }
 }

@@ -7,6 +7,7 @@ import {
     IsOptional,
     IsString,
     Min,
+    ValidateNested,
 } from 'class-validator';
 import { AnswerValueType } from '../../../generated/client/enums';
 
@@ -45,6 +46,11 @@ export class SequentialAnswerDto {
     @IsNumber()
     numericValue?: number;
 
+    @IsOptional()
+    @ValidateNested({ each: true })
+    @Type(() => SequentialPartAnswerDto)
+    parts?: SequentialPartAnswerDto[];
+
     // Older clients may still send navigation hints. They are accepted only
     // for compatibility and are deliberately ignored by the service; the
     // server-owned progress row determines the question being mutated.
@@ -55,4 +61,12 @@ export class SequentialAnswerDto {
     @IsOptional()
     @Allow()
     currentQuestion?: unknown;
+}
+
+export class SequentialPartAnswerDto {
+    @IsString()
+    partId!: string;
+
+    @IsString()
+    rawValue!: string;
 }

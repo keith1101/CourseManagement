@@ -235,7 +235,7 @@ Hỗ trợ lọc đề thi theo trạng thái:
 
 `GET /api/exams?status=DRAFT`
 
-Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`; Admin có thể lọc mọi trạng thái. Exam trả về số lượng câu hỏi và dữ liệu liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. DELETE Exam là soft delete: đề thi, câu hỏi, assignments và attempts liên quan không còn xuất hiện qua các API thông thường.
+Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`: mọi Student active có thể xem/làm đề `FREE`, còn đề `PRO` yêu cầu Student PRO còn hạn. Assignment là luồng giao bài có deadline, không phải điều kiện mở đề FREE công khai. Admin có thể lọc mọi trạng thái. Exam trả về số lượng câu hỏi và dữ liệu liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. DELETE Exam là soft delete: đề thi, câu hỏi, assignments và attempts liên quan không còn xuất hiện qua các API thông thường.
 
 ## 6. Questions Module
 
@@ -258,6 +258,8 @@ Câu hỏi hỗ trợ:
 
 * Trắc nghiệm A/B/C/D
 * Tự luận
+* Tự luận nhiều ý (`MULTI_PART_SHORT_ANSWER`): gửi `parts`, mỗi ý gồm
+  `contentText` và `correctAnswer`. Mỗi ý là một đơn vị điểm riêng.
 * Hình ảnh
 * Đáp án đúng
 * Giải thích
@@ -363,6 +365,24 @@ Nếu học sinh trả lời sai hoặc hết giờ, hệ thống có thể hi�
 * Đáp án đúng
 * Giải thích
 * Hướng dẫn
+
+Với câu tự luận nhiều ý, client gửi `parts` khi gọi endpoint nộp đáp án:
+
+```json
+{
+  "questionId": "...",
+  "progressVersion": 0,
+  "parts": [
+    { "partId": "...", "rawValue": "20.0" },
+    { "partId": "...", "rawValue": "Việt Nam" }
+  ]
+}
+```
+
+Đáp án số được so sánh theo giá trị chính xác (ví dụ `20`, `20.0`, `20.00`),
+còn văn bản không phân biệt hoa/thường, dấu tiếng Việt và khoảng trắng. Response
+feedback có `parts[].isCorrect` để tô xanh/đỏ từng ý; ý sai có thêm
+`correctAnswer`. Câu nhiều ý chỉ tự chuyển sau 3 giây khi tất cả ý đều đúng.
 
 ## Thứ tự triển khai
 

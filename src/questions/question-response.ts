@@ -25,6 +25,14 @@ export const studentQuestionSelect = {
       position: 'asc' as const,
     },
   },
+  questionParts: {
+    select: {
+      id: true,
+      contentText: true,
+      position: true,
+    },
+    orderBy: { position: 'asc' as const },
+  },
 } as const;
 
 export type StudentQuestionOption = {
@@ -48,6 +56,7 @@ export type StudentQuestion = {
   timeLimitSeconds?: number | null;
   position: number;
   questionOptions?: StudentQuestionOption[];
+  questionParts?: Array<{ id: string; contentText: string; position: number }>;
 };
 
 export function sanitizeStudentQuestion(question: StudentQuestion) {
@@ -71,6 +80,11 @@ export function sanitizeStudentQuestion(question: StudentQuestion) {
       ...(option.imageStorageUri
         ? { imageStorageUri: option.imageStorageUri }
         : {}),
+    })),
+    questionParts: (question.questionParts ?? []).map((part) => ({
+      id: part.id,
+      contentText: part.contentText,
+      position: part.position,
     })),
   };
 }

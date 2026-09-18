@@ -50,6 +50,17 @@ const studentAttemptAnswerSelect = {
             position: true,
         },
     },
+    partAnswers: {
+        select: {
+            questionPartId: true,
+            rawValue: true,
+            normalizedText: true,
+            numericValue: true,
+            isCorrect: true,
+            questionPart: { select: { id: true, contentText: true, position: true } },
+        },
+        orderBy: { questionPart: { position: 'asc' as const } },
+    },
 } as const;
 
 const studentResultAttemptAnswerSelect = {
@@ -98,6 +109,14 @@ type StudentAttemptAnswer = {
     updatedAt?: Date;
     question?: StudentQuestion | null;
     selectedOption?: StudentQuestionOption | null;
+    partAnswers?: Array<{
+        questionPartId: string;
+        rawValue: string;
+        normalizedText: string | null;
+        numericValue: number | null;
+        isCorrect?: boolean;
+        questionPart: { id: string; contentText: string; position: number };
+    }>;
 };
 
 const attemptDetailSelect = {
@@ -184,6 +203,10 @@ const sequentialQuestionEvaluationSelect = {
             numericValue: true,
             isPrimary: true,
         },
+        orderBy: { position: 'asc' as const },
+    },
+    questionParts: {
+        select: { id: true, contentText: true, correctAnswer: true, position: true },
         orderBy: { position: 'asc' as const },
     },
 } as const;
@@ -324,22 +347,14 @@ export class AttemptsService {
                     userId,
                     examId,
                     deletedAt: null,
+                    dueAt: { gt: new Date() },
                 },
                 orderBy: { dueAt: 'asc' },
                 select: { id: true, dueAt: true },
             });
 
             if (assignment) {
-                if (assignment.dueAt.getTime() < Date.now()) {
-                    throw new ForbiddenException('Assignment is overdue');
-                }
-
                 assignmentId = assignment.id;
-            } else if (!isPro) {
-                throw new ForbiddenException({
-                    code: 'ASSIGNMENT_REQUIRED',
-                    message: 'Tài khoản miễn phí chỉ được làm đề thi đã được giao.',
-                });
             }
         }
 
@@ -364,12 +379,7 @@ export class AttemptsService {
             return this.createSequentialAttempt(examId, userId, assignmentId);
         }
 
-        const totalQuestions = await this.prisma.question.count({
-            where: {
-                examId,
-                deletedAt: null,
-            },
-        });
+        const totalQuestions = await this.countExamScoreUnits(this.prisma, examId);
 
         const attempt = await this.prisma.examAttempt.create({
             data: {
@@ -490,11 +500,24 @@ export class AttemptsService {
                         numericValue: true,
                     },
                 },
+                questionParts: {
+                    select: { id: true, contentText: true, correctAnswer: true, position: true },
+                    orderBy: { position: 'asc' },
+                },
             },
         });
 
         if (!question) {
             throw new NotFoundException('Question not found for this exam');
+        }
+
+        if (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER) {
+            return this.saveMultipartAnswer(
+                attemptId,
+                question as any,
+                saveAttemptAnswerDto.parts ?? [],
+                !!saveAttemptAnswerDto.timedOut,
+            );
         }
 
         // Treat an empty form value as no selection. Persisting `''` would
@@ -605,7 +628,13 @@ export class AttemptsService {
     ) {
         const questions = await this.prisma.question.findMany({
             where: { examId, deletedAt: null },
-            select: { id: true, position: true, timeLimitSeconds: true },
+            select: {
+                id: true,
+                position: true,
+                timeLimitSeconds: true,
+                questionType: true,
+                questionParts: { select: { id: true } },
+            },
             orderBy: [{ position: 'asc' }, { id: 'asc' }],
         });
 
@@ -621,7 +650,7 @@ export class AttemptsService {
                         userId,
                         examId,
                         assignmentId,
-                        totalQuestions: questions.length,
+                        totalQuestions: this.countScoreUnits(questions),
                         flowVersion: 2,
                         progressVersion: 0,
                         startedAt,
@@ -725,6 +754,7 @@ export class AttemptsService {
                           current.questionId,
                           current.status === AttemptQuestionStatus.CORRECT,
                           current.status === AttemptQuestionStatus.TIMED_OUT,
+                          await this.getStoredPartAnswers(attempt.id, current.questionId),
                       )
                     : undefined;
 
@@ -847,13 +877,16 @@ export class AttemptsService {
                 const timedOut = !!state.current.deadlineAt &&
                     receivedAt.getTime() >= state.current.deadlineAt.getTime();
                 const answer = this.buildSequentialAnswerData(question, dto, !timedOut);
-                const isCorrect = !timedOut && this.isAnswerCorrect(question, {
-                    selectedOptionId: answer.selectedOptionId,
-                    answerType: answer.answerType,
-                    rawValue: answer.rawValue,
-                    normalizedText: answer.normalizedText,
-                    numericValue: answer.numericValue,
-                });
+                const isCorrect = !timedOut &&
+                    (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                        ? (answer.partAnswers ?? []).every((part: any) => part.isCorrect)
+                        : this.isAnswerCorrect(question, {
+                            selectedOptionId: answer.selectedOptionId,
+                            answerType: answer.answerType,
+                            rawValue: answer.rawValue,
+                            normalizedText: answer.normalizedText,
+                            numericValue: answer.numericValue,
+                        }));
 
                 await this.persistSequentialAnswer(
                     transaction,
@@ -894,6 +927,7 @@ export class AttemptsService {
                     timedOut,
                     advanceAfter,
                     progressVersion: state.progressVersion + 1,
+                    partAnswers: answer.partAnswers ?? [],
                 };
             },
         );
@@ -918,6 +952,7 @@ export class AttemptsService {
                 outcome.questionId,
                 outcome.isCorrect,
                 outcome.timedOut,
+                outcome.kind === 'graded' ? (outcome as any).partAnswers : undefined,
             ),
         };
     }
@@ -1006,9 +1041,7 @@ export class AttemptsService {
                     return;
                 }
 
-                const correctCount = await transaction.attemptQuestionProgress.count({
-                    where: { attemptId, isCorrect: true },
-                });
+                const correctCount = await this.countSequentialCorrectUnits(transaction, attemptId);
                 await transaction.examAttempt.update({
                     where: { id: attemptId },
                     data: {
@@ -1066,6 +1099,10 @@ export class AttemptsService {
                         numericValue: true,
                     },
                 },
+                questionParts: {
+                    select: { id: true, contentText: true, correctAnswer: true, position: true },
+                    orderBy: { position: 'asc' },
+                },
             },
         });
 
@@ -1079,6 +1116,9 @@ export class AttemptsService {
                 rawValue: true,
                 normalizedText: true,
                 numericValue: true,
+                partAnswers: {
+                    select: { questionPartId: true, rawValue: true, normalizedText: true, numericValue: true },
+                },
             },
         });
 
@@ -1092,12 +1132,19 @@ export class AttemptsService {
                 return [];
             }
 
-            const isCorrect = this.isAnswerCorrect(question, answer);
-            return [{ answer, isCorrect }];
+            const isCorrect = question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                ? this.gradeMultipartAnswers(question.questionParts, answer.partAnswers, false).every((part) => part.isCorrect)
+                : this.isAnswerCorrect(question, answer);
+            const correctUnits = question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                ? this.gradeMultipartAnswers(question.questionParts, answer.partAnswers, false)
+                    .filter((part) => part.isCorrect).length
+                : Number(isCorrect);
+            return [{ answer, isCorrect, correctUnits }];
         });
-        const correctCount = evaluations.filter(
-            (evaluation) => evaluation.isCorrect,
-        ).length;
+        const correctCount = evaluations.reduce(
+            (total, evaluation) => total + evaluation.correctUnits,
+            0,
+        );
 
         await this.prisma.$transaction(async (transaction) => {
             for (const evaluation of evaluations) {
@@ -1152,15 +1199,41 @@ export class AttemptsService {
             Promise.all(questions.map((question) => this.withQuestionMedia(question))),
         ]);
 
-        const persistedCorrectCount = decoratedResult.attemptedAnswers?.filter(
-            (answer) => answer.isCorrect === true,
-        ).length ?? 0;
+        const persistedCorrectCount = decoratedResult.attemptedAnswers?.reduce(
+            (total, answer) => total +
+                (answer.question?.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                    ? answer.partAnswers?.filter((part) => part.isCorrect === true).length ?? 0
+                    : Number(answer.isCorrect === true)),
+            0,
+        ) ?? 0;
         if (persistedCorrectCount !== result.correctCount) {
             throw new ConflictException('Attempt result is inconsistent');
         }
 
+        const partKeys = await this.prisma.questionPart.findMany({
+            where: { question: { examId: result.examId, deletedAt: null } },
+            select: { id: true, correctAnswer: true },
+        });
+        const correctAnswerByPartId = new Map(
+            partKeys.map((part) => [part.id, part.correctAnswer]),
+        );
+
         return {
             ...decoratedResult,
+            attemptedAnswers: decoratedResult.attemptedAnswers?.map((answer) => ({
+                ...answer,
+                ...(answer.question?.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                    ? {
+                        partFeedback: (answer.partAnswers ?? []).map((part) => ({
+                            partId: part.questionPartId,
+                            isCorrect: part.isCorrect === true,
+                            ...(part.isCorrect === true
+                                ? {}
+                                : { correctAnswer: correctAnswerByPartId.get(part.questionPartId) ?? null }),
+                        })),
+                    }
+                    : {}),
+            })),
             questions: decoratedQuestions.map((question) =>
                 sanitizeStudentQuestion(question),
             ),
@@ -1364,6 +1437,10 @@ export class AttemptsService {
                 correctTextAnswer: true,
                 explaination: true,
                 explanationImageUrl: true,
+                questionParts: {
+                    select: { id: true, contentText: true, correctAnswer: true, position: true },
+                    orderBy: { position: 'asc' },
+                },
             },
         });
         if (!question) {
@@ -1396,7 +1473,12 @@ export class AttemptsService {
             },
             orderBy: { position: 'asc' },
         });
-        return { ...question, questionOptions, questionAcceptedAnswers };
+        const questionParts = await transaction.questionPart.findMany({
+            where: { questionId },
+            select: { id: true, contentText: true, correctAnswer: true, position: true },
+            orderBy: { position: 'asc' },
+        });
+        return { ...question, questionOptions, questionAcceptedAnswers, questionParts };
     }
 
     private async persistSequentialAnswer(
@@ -1416,27 +1498,35 @@ export class AttemptsService {
             orderBy: { updatedAt: 'desc' },
             select: { id: true },
         });
+        const { partAnswers, ...answerData } = answer;
         const data = {
-            ...answer,
+            ...answerData,
             position: state.current.ordinal,
             isCorrect,
             timedOut,
             submittedAt,
             ...(submissionKey !== null ? { submissionKey } : {}),
         };
+        let attemptAnswerId: string;
         if (existing) {
             await transaction.attemptAnswer.update({
                 where: { id: existing.id },
                 data,
             });
+            attemptAnswerId = existing.id;
         } else {
-            await transaction.attemptAnswer.create({
+            const created = await transaction.attemptAnswer.create({
                 data: {
                     attemptId: state.id,
                     questionId: state.current.questionId,
                     ...data,
                 },
+                select: { id: true },
             });
+            attemptAnswerId = created.id;
+        }
+        if (partAnswers) {
+            await this.replacePartAnswers(transaction, attemptAnswerId, partAnswers);
         }
     }
 
@@ -1445,6 +1535,23 @@ export class AttemptsService {
         dto: SequentialAnswerDto,
         requireAnswer: boolean,
     ) {
+        if (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER) {
+            const partAnswers = this.gradeMultipartAnswers(
+                question.questionParts,
+                dto.parts ?? [],
+                requireAnswer,
+            );
+            return {
+                selectedOptionId: null,
+                answerType: AnswerValueType.TEXT,
+                rawValue: '',
+                normalizedText: '',
+                content: null,
+                numericValue: null,
+                partAnswers,
+            };
+        }
+
         const selectedOptionId = dto.selectedOptionId?.trim() || null;
         const selectedOption = selectedOptionId
             ? question.questionOptions.find((option: any) => option.id === selectedOptionId)
@@ -1585,9 +1692,7 @@ export class AttemptsService {
             return;
         }
 
-        const correctCount = await transaction.attemptQuestionProgress.count({
-            where: { attemptId: state.id, isCorrect: true },
-        });
+        const correctCount = await this.countSequentialCorrectUnits(transaction, state.id);
         await transaction.examAttempt.update({
             where: { id: state.id },
             data: {
@@ -1604,6 +1709,7 @@ export class AttemptsService {
         questionId: string,
         isCorrect: boolean,
         timedOut: boolean,
+        submittedParts?: Array<{ questionPartId: string; rawValue: string; isCorrect: boolean }>,
     ) {
         const question = await this.prisma.question.findUnique({
             where: { id: questionId },
@@ -1616,6 +1722,20 @@ export class AttemptsService {
             isCorrect,
             timedOut,
         };
+        if (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER) {
+            const submittedById = new Map(
+                (submittedParts ?? []).map((part) => [part.questionPartId, part]),
+            );
+            feedback.parts = question.questionParts.map((part: any) => {
+                const answer = submittedById.get(part.id);
+                return {
+                    partId: part.id,
+                    isCorrect: answer?.isCorrect === true,
+                    correctAnswer: answer?.isCorrect === true ? undefined : part.correctAnswer,
+                };
+            });
+            return feedback;
+        }
         if (isCorrect) return feedback;
 
         const decorated = await this.withQuestionMedia(question as any);
@@ -1643,6 +1763,18 @@ export class AttemptsService {
             image: await this.resolveOptionalMedia(question.explanationImageUrl),
         };
         return feedback;
+    }
+
+    private async getStoredPartAnswers(attemptId: string, questionId: string) {
+        const answer = await this.prisma.attemptAnswer.findFirst({
+            where: { attemptId, questionId },
+            select: {
+                partAnswers: {
+                    select: { questionPartId: true, rawValue: true, isCorrect: true },
+                },
+            },
+        });
+        return answer?.partAnswers;
     }
 
     private async resolveOptionalMedia(value: string | null | undefined) {
@@ -1770,6 +1902,14 @@ export class AttemptsService {
                     content: answer.content,
                     numericValue: answer.numericValue,
                     ...(includeCorrectness ? { isCorrect: answer.isCorrect === true } : {}),
+                    partAnswers: answer.partAnswers?.map((part) => ({
+                        partId: part.questionPartId,
+                        rawValue: part.rawValue,
+                        normalizedText: part.normalizedText,
+                        numericValue: part.numericValue,
+                        ...(includeCorrectness ? { isCorrect: part.isCorrect === true } : {}),
+                        part: part.questionPart,
+                    })),
                     position: answer.position,
                     ...(answer.createdAt ? { createdAt: answer.createdAt } : {}),
                     ...(answer.updatedAt ? { updatedAt: answer.updatedAt } : {}),
@@ -1842,6 +1982,157 @@ export class AttemptsService {
         }
 
         return correctTextAnswers.includes(normalizedAnswer);
+    }
+
+    private async saveMultipartAnswer(
+        attemptId: string,
+        question: any,
+        submittedParts: Array<{ partId: string; rawValue: string }>,
+        timedOut: boolean,
+    ): Promise<any> {
+        const partAnswers = this.gradeMultipartAnswers(
+            question.questionParts,
+            submittedParts,
+            !timedOut,
+        );
+        const isCorrect = !timedOut && partAnswers.every((part) => part.isCorrect);
+        const existing = await this.prisma.attemptAnswer.findFirst({
+            where: { attemptId, questionId: question.id },
+            select: { id: true },
+        });
+        const data = {
+            selectedOptionId: null,
+            answerType: AnswerValueType.TEXT,
+            rawValue: '',
+            normalizedText: '',
+            content: null,
+            numericValue: null,
+            isCorrect,
+            position: question.position,
+            timedOut,
+        };
+        const answer = existing
+            ? await this.prisma.attemptAnswer.update({ where: { id: existing.id }, data })
+            : await this.prisma.attemptAnswer.create({
+                data: { attemptId, questionId: question.id, ...data },
+            });
+        await this.replacePartAnswers(this.prisma, answer.id, partAnswers);
+        return {
+            id: answer.id,
+            attemptId,
+            questionId: question.id,
+            partAnswers: partAnswers.map((part) => ({
+                partId: part.questionPartId,
+                rawValue: part.rawValue,
+            })),
+        };
+    }
+
+    private gradeMultipartAnswers(
+        questionParts: Array<{ id: string; correctAnswer: string }>,
+        submittedParts: Array<{ partId?: string; questionPartId?: string; rawValue: string }>,
+        requireAllParts: boolean,
+    ) {
+        const submittedById = new Map<string, string>();
+        for (const part of submittedParts) {
+            const partId = part.partId ?? part.questionPartId;
+            if (!partId) throw new BadRequestException('partId is required');
+            if (submittedById.has(partId)) {
+                throw new BadRequestException('Each question part can only be answered once');
+            }
+            submittedById.set(partId, part.rawValue ?? '');
+        }
+        const expectedIds = new Set(questionParts.map((part) => part.id));
+        if ([...submittedById.keys()].some((id) => !expectedIds.has(id))) {
+            throw new BadRequestException('partId must belong to the current question');
+        }
+        if (requireAllParts && submittedById.size !== questionParts.length) {
+            throw new BadRequestException('An answer is required for every question part');
+        }
+        return questionParts.map((part) => {
+            const rawValue = submittedById.get(part.id) ?? '';
+            const numericValue = this.toExactNumber(rawValue);
+            const correctNumericValue = this.toExactNumber(part.correctAnswer);
+            const isCorrect = numericValue !== null && correctNumericValue !== null
+                ? numericValue === correctNumericValue
+                : this.normalizeTextAnswer(rawValue) === this.normalizeTextAnswer(part.correctAnswer);
+            return {
+                questionPartId: part.id,
+                rawValue,
+                normalizedText: this.normalizeTextAnswer(rawValue),
+                numericValue,
+                isCorrect,
+            };
+        });
+    }
+
+    private async replacePartAnswers(
+        db: any,
+        attemptAnswerId: string,
+        partAnswers: Array<{
+            questionPartId: string;
+            rawValue: string;
+            normalizedText: string;
+            numericValue: number | null;
+            isCorrect: boolean;
+        }>,
+    ) {
+        await db.attemptAnswerPart.deleteMany({ where: { attemptAnswerId } });
+        if (partAnswers.length > 0) {
+            await db.attemptAnswerPart.createMany({
+                data: partAnswers.map((part) => ({ attemptAnswerId, ...part })),
+            });
+        }
+    }
+
+    private countScoreUnits(questions: Array<{ questionType: QuestionType; questionParts?: Array<unknown> }>) {
+        return questions.reduce(
+            (total, question) => total +
+                (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                    ? question.questionParts?.length ?? 0
+                    : 1),
+            0,
+        );
+    }
+
+    private async countExamScoreUnits(db: any, examId: string) {
+        const questions = await db.question.findMany({
+            where: { examId, deletedAt: null },
+            select: { questionType: true, questionParts: { select: { id: true } } },
+        });
+        return this.countScoreUnits(questions);
+    }
+
+    private async countSequentialCorrectUnits(db: any, attemptId: string) {
+        const answers = await db.attemptAnswer.findMany({
+            where: { attemptId },
+            select: {
+                isCorrect: true,
+                question: { select: { questionType: true } },
+                partAnswers: { select: { isCorrect: true } },
+            },
+        });
+        return answers.reduce((total: number, answer: any) => total +
+            (answer.question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                ? answer.partAnswers.filter((part: any) => part.isCorrect).length
+                : Number(answer.isCorrect)), 0);
+    }
+
+    private toExactNumber(value: string): number | null {
+        const trimmed = value.trim();
+        if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(trimmed)) return null;
+        const number = Number(trimmed);
+        return Number.isFinite(number) ? number : null;
+    }
+
+    private normalizeTextAnswer(value: string) {
+        return value
+            .trim()
+            .toLocaleLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/đ/g, 'd')
+            .replace(/\s+/g, '');
     }
 
     private normalize(value: string) {

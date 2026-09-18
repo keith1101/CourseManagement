@@ -60,12 +60,6 @@ export class ExamsService {
       where.status = ExamStatus.PUBLISHED;
       if (!access.isPro) {
         where.accessLevel = AccessLevel.FREE;
-        where.examAssignments = {
-          some: {
-            userId: viewer.userId,
-            deletedAt: null,
-          },
-        };
       }
     }
 
@@ -287,12 +281,6 @@ export class ExamsService {
         ? {}
         : {
             accessLevel: AccessLevel.FREE,
-            examAssignments: {
-              some: {
-                userId,
-                deletedAt: null,
-              },
-            },
           }),
     } satisfies Prisma.ExamWhereInput;
   }

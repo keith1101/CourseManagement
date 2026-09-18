@@ -130,6 +130,7 @@ describe('AttemptsService', () => {
         createMany: jest.fn(), update: jest.fn(), count: jest.fn(),
       },
       question: { count: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
+      questionPart: { findMany: jest.fn().mockResolvedValue([]) },
       questionOption: { findMany: jest.fn() },
       questionAcceptedAnswer: { findMany: jest.fn() },
       attemptAnswer: {
@@ -186,7 +187,11 @@ describe('AttemptsService', () => {
       dueAt: new Date(Date.now() + 60_000),
     });
     prisma.examAttempt.findFirst.mockResolvedValue(null);
-    prisma.question.count.mockResolvedValue(1);
+    prisma.question.findMany
+      .mockResolvedValueOnce([
+        { questionType: QuestionType.MULTIPLE_CHOICE, questionParts: [] },
+      ])
+      .mockResolvedValueOnce([]);
     prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
     prisma.examAttempt.findUnique
       .mockResolvedValueOnce({ id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS })
@@ -364,16 +369,31 @@ describe('AttemptsService', () => {
     }));
   });
 
-  it('rejects an unassigned free exam', async () => {
+  it('starts an unassigned published free exam', async () => {
     prisma.exam.findUnique.mockResolvedValue({
       id: 'exam-1', status: 'PUBLISHED', title: 'Exam', accessLevel: 'FREE',
     });
     prisma.user.findUnique.mockResolvedValue({ accessLevel: 'FREE', proExpiresAt: null });
     prisma.examAssignment.findFirst.mockResolvedValue(null);
+    prisma.examAttempt.findFirst.mockResolvedValue(null);
+    prisma.question.findMany
+      .mockResolvedValueOnce([
+        { questionType: QuestionType.MULTIPLE_CHOICE, questionParts: [] },
+      ])
+      .mockResolvedValueOnce([]);
+    prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    prisma.examAttempt.findUnique
+      .mockResolvedValueOnce({ id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS })
+      .mockResolvedValueOnce({ id: 'attempt-1', examId: 'exam-1', attemptedAnswers: [] });
 
-    await expect(service.start('exam-1', 'student-1', {})).rejects.toMatchObject({
-      response: expect.objectContaining({ code: 'ASSIGNMENT_REQUIRED' }),
-    });
+    await expect(service.start('exam-1', 'student-1', {})).resolves.toEqual(
+      expect.objectContaining({ id: 'attempt-1', questions: [] }),
+    );
+    expect(prisma.examAttempt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ assignmentId: undefined, totalQuestions: 1 }),
+      }),
+    );
   });
 
   it('includes student identity when listing attempts', async () => {

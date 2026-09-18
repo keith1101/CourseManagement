@@ -116,6 +116,7 @@ model Question {
   subject                 Subject                   @relation(fields: [subjectId], references: [id])
   questionAcceptedAnswers QuestionAcceptedAnswer[]
   questionOptions         QuestionOption[]
+  questionParts           QuestionPart[]
 
   @@index([subjectId])
 }
@@ -147,6 +148,24 @@ model QuestionAcceptedAnswer {
   updatedAt      DateTime        @updatedAt
   numericValue   Float?
   question       Question        @relation(fields: [questionId], references: [id])
+}
+
+// A multipart short-answer question is made up of independently graded
+// prompts.  The answer type is inferred from correctAnswer at grading time so
+// the authoring UI only needs the prompt and its expected answer.
+model QuestionPart {
+  id            String              @id @default(uuid())
+  questionId    String
+  contentText   String
+  correctAnswer String
+  position      Int
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  question      Question            @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  attemptAnswers AttemptAnswerPart[]
+
+  @@unique([questionId, position])
+  @@index([questionId])
 }
 
 model ExamAssignment {
@@ -236,9 +255,27 @@ model AttemptAnswer {
   examAttempt      ExamAttempt     @relation(fields: [attemptId], references: [id])
   question         Question        @relation(fields: [questionId], references: [id])
   selectedOption   QuestionOption? @relation(fields: [selectedOptionId], references: [id])
+  partAnswers      AttemptAnswerPart[]
 
   @@unique([attemptId, submissionKey])
   @@index([attemptId, questionId])
+}
+
+model AttemptAnswerPart {
+  id              String        @id @default(uuid())
+  attemptAnswerId String
+  questionPartId  String
+  rawValue        String
+  normalizedText  String?
+  numericValue    Float?
+  isCorrect       Boolean       @default(false)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  attemptAnswer   AttemptAnswer @relation(fields: [attemptAnswerId], references: [id], onDelete: Cascade)
+  questionPart    QuestionPart  @relation(fields: [questionPartId], references: [id])
+
+  @@unique([attemptAnswerId, questionPartId])
+  @@index([questionPartId])
 }
 
 model EmailVerificationToken {
@@ -279,6 +316,7 @@ enum ExamStatus {
 enum QuestionType {
   MULTIPLE_CHOICE
   SHORT_ANSWER
+  MULTI_PART_SHORT_ANSWER
 }
 
 enum AnswerValueType {
