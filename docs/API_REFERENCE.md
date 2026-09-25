@@ -1,0 +1,305 @@
+> Tài liệu endpoint được chuyển từ README cũ ngày 25/09/2026 để giữ lại chi tiết nghiệp vụ. Các controller trong `src/` là nguồn tham chiếu chính khi API thay đổi.
+
+# API Reference — Course Management
+
+## 1. Auth Module
+
+Auth module xử lý đăng ký, đăng nhập, xác thực người dùng và quản lý mật khẩu.
+
+| Method | Endpoint                | Mô tả                                   | Quyền         | Trạng thái |
+| ------ | ----------------------- | --------------------------------------- | ------------- | ---------- |
+| POST   | `/api/auth/register`        | Đăng ký tài khoản học sinh              | Public        | Done       |
+| POST   | `/api/auth/verify-email`    | Xác nhận email bằng verification token  | Public        | Done       |
+| POST   | `/api/auth/resend-verification` | Gửi lại email xác nhận              | Public        | Done       |
+| POST   | `/api/auth/login`           | Đăng nhập và nhận access token          | Public        | Done       |
+| GET    | `/api/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Done       |
+| PATCH  | `/api/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Done       |
+
+Tài khoản đăng ký mới phải xác nhận email trước khi đăng nhập. Khi phát triển local,
+có thể đặt `EMAIL_PROVIDER="console"` để in verification URL trong log backend.
+Khi gửi email thật bằng Gmail API, đặt `EMAIL_PROVIDER="gmail"` và cấu hình
+`GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
+`GMAIL_SENDER_EMAIL`. Gmail API sử dụng OAuth2 với scope
+`https://www.googleapis.com/auth/gmail.send`.
+Các yêu cầu gửi email xác nhận được giới hạn theo email (bao gồm email đầu tiên
+khi đăng ký): mặc định chờ 60 giây giữa hai lần yêu cầu và tối đa 5 lần trong
+60 phút. Có thể điều chỉnh bằng
+`EMAIL_RESEND_COOLDOWN_SECONDS`, `EMAIL_RESEND_MAX_ATTEMPTS` và
+`EMAIL_RESEND_WINDOW_MINUTES`.
+Nếu email đã tồn tại nhưng chưa xác minh, đăng ký lại sẽ phát hành token mới và gửi
+lại email xác nhận; email đã xác minh vẫn trả về lỗi trùng email.
+
+## 2. Users Module
+
+Users module cho phép Admin quản lý tài khoản học sinh.
+
+| Method | Endpoint            | Mô tả                         | Quyền | Trạng thái |
+| ------ | ------------------- | ----------------------------- | ----- | ---------- |
+| GET    | `/api/users`            | Lấy danh sách học sinh        | Admin | Done       |
+| GET    | `/api/users/:id`        | Xem chi tiết học sinh         | Admin | Done       |
+| PATCH  | `/api/users/:id`        | Cập nhật thông tin học sinh   | Admin | Done       |
+| PATCH  | `/api/users/:id/lock`   | Khóa tài khoản                | Admin | Done       |
+| PATCH  | `/api/users/:id/unlock` | Mở khóa tài khoản             | Admin | Done       |
+| PATCH  | `/api/users/:id/pro`    | Chuyển tài khoản sang Pro     | Admin | Done       |
+| PATCH  | `/api/users/:id/free`   | Chuyển tài khoản về Free      | Admin | Done       |
+
+Hỗ trợ tìm kiếm học sinh:
+
+`GET /api/users?search=...`
+
+Ghi chú: Hàm tìm học sinh theo email được sử dụng nội bộ cho Auth module, không cần tạo endpoint riêng để tránh làm lộ email người dùng. Response Users không chứa `passwordHash`.
+
+## 3. Subjects Module
+
+Subjects module quản lý danh sách môn học trong hệ thống.
+
+Các môn học mặc định:
+
+* Toán
+* KHTN
+* Lịch sử
+* Địa lý
+* Tiếng Anh
+* Tiếng Việt
+
+| Method | Endpoint        | Mô tả                 | Quyền         | Trạng thái |
+| ------ | --------------- | --------------------- | ------------- | ---------- |
+| GET    | `/api/subjects`     | Lấy danh sách môn học | Student/Admin | Done       |
+| GET    | `/api/subjects/:id` | Xem chi tiết môn học  | Student/Admin | Done       |
+| POST   | `/api/subjects`     | Tạo môn học           | Admin         | Done       |
+| PATCH  | `/api/subjects/:id` | Cập nhật môn học      | Admin         | Done       |
+| DELETE | `/api/subjects/:id` | Xóa mềm môn học       | Admin         | Done       |
+
+## 4. Materials Module
+
+Materials quản lý metadata và liên kết tài liệu học tập. Binary được upload vào
+private Cloudflare R2; `storageUrl` và `embedUrl` vẫn là các field API hiện tại.
+
+| Method | Endpoint                         | Mô tả                         | Quyền         | Trạng thái |
+| ------ | -------------------------------- | ----------------------------- | ------------- | ---------- |
+| POST   | `/api/materials/upload`          | Upload PDF/DOCX vào R2        | Admin         | Done       |
+| POST   | `/api/materials`                 | Tạo metadata tài liệu         | Admin         | Done       |
+| GET    | `/api/materials`                 | Lấy danh sách tài liệu        | Student/Admin | Done       |
+| GET    | `/api/materials/:id`             | Xem chi tiết tài liệu         | Student/Admin | Done       |
+| PATCH  | `/api/materials/:id`             | Cập nhật metadata/liên kết    | Admin         | Done       |
+| DELETE | `/api/materials/:id`             | Xóa metadata tài liệu         | Admin         | Done       |
+| PATCH  | `/api/materials/:id/publish`     | Công khai tài liệu            | Admin         | Done       |
+| PATCH  | `/api/materials/:id/unpublish`   | Ẩn tài liệu                   | Admin         | Done       |
+
+Có thể lọc danh sách bằng `subjectId`, `materialType` và `accessLevel`.
+
+`PDF` và `DOCX` cần `storageUrl` hợp lệ (R2 object key hoặc URL legacy); `EMBEDDED_VIDEO` cần `embedUrl` hợp lệ.
+Tài liệu mới luôn unpublished. Student chỉ thấy tài liệu published thuộc Subject
+active và phù hợp FREE/PRO; Student PRO hết hạn được xử lý như FREE.
+
+Với `EMBEDDED_VIDEO`, backend tự chuẩn hóa các URL YouTube dạng watch, youtu.be,
+shorts, live, embed, v/e, mobile, music và các link redirect/attribution về
+`https://www.youtube.com/embed/{videoId}` trước khi validate và lưu. URL của
+nguồn video khác YouTube được giữ nguyên.
+
+### Upload file lên Cloudflare R2
+
+Backend hỗ trợ upload PDF/DOCX bằng `POST /api/materials/upload` với
+`multipart/form-data`:
+
+| Field | Bắt buộc | Mô tả |
+| ----- | -------- | ----- |
+| `file` | Có | File PDF hoặc DOCX, tối đa 25 MB |
+| `subjectId` | Có | Subject đang active |
+| `title` | Có | Tên tài liệu |
+| `accessLevel` | Có | `FREE` hoặc `PRO` |
+
+File được lưu private trong bucket R2; database chỉ lưu object key (ví dụ
+`materials/{materialId}/file.pdf`), không lưu signed URL. Dùng
+`GET /api/materials/:id/download` để nhận signed URL có thời hạn 15 phút.
+Question image, hint image, explanation image và option image cũng theo cùng
+quy tắc. Các URL GCS cũ được coi là legacy/unavailable; object cũ không được
+migrate.
+
+Cấu hình backend qua `.env`:
+
+```env
+R2_ACCOUNT_ID=your-cloudflare-account-id
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=course-media
+# Optional; defaults to https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com
+R2_ENDPOINT=
+R2_SIGNED_URL_TTL_SECONDS=900
+```
+
+
+## 5. Exams Module
+
+Exams module quản lý đề thi độc lập với Subject. Mỗi Question trong đề thi bắt buộc thuộc một Subject đang active.
+
+Đề thi hỗ trợ các trạng thái:
+
+* DRAFT
+* PUBLISHED
+* ARCHIVED (dành cho mở rộng sau, hiện chưa có endpoint archive)
+
+| Method | Endpoint               | Mô tả                              | Quyền         | Trạng thái |
+| ------ | ---------------------- | ---------------------------------- | ------------- | ---------- |
+| POST   | `/api/exams`               | Tạo đề thi                         | Admin         | Done       |
+| GET    | `/api/exams`               | Lấy danh sách đề thi               | Student/Admin | Done       |
+| GET    | `/api/exams/:id`           | Xem chi tiết đề thi                | Student/Admin | Done       |
+| PATCH  | `/api/exams/:id`           | Cập nhật đề thi                    | Admin         | Done       |
+| DELETE | `/api/exams/:id`           | Xóa đề thi                         | Admin         | Done       |
+| PATCH  | `/api/exams/:id/publish`   | Công khai đề thi                   | Admin         | Done       |
+| PATCH  | `/api/exams/:id/unpublish` | Chuyển đề thi về trạng thái Draft | Admin         | Done       |
+
+Hỗ trợ lọc đề thi theo trạng thái:
+
+`GET /api/exams?status=PUBLISHED`
+
+`GET /api/exams?status=DRAFT`
+
+Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`: mọi Student active có thể xem/làm đề `FREE`, còn đề `PRO` yêu cầu Student PRO còn hạn. Assignment là luồng giao bài có deadline, không phải điều kiện mở đề FREE công khai. Admin có thể lọc mọi trạng thái. Exam trả về số lượng câu hỏi và dữ liệu liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. DELETE Exam là soft delete: đề thi, câu hỏi, assignments và attempts liên quan không còn xuất hiện qua các API thông thường.
+
+## 6. Questions Module
+
+Questions module quản lý câu hỏi trong đề thi. Khi tạo hoặc đổi câu hỏi, `subjectId` phải trỏ tới một Subject đang active; một Exam có thể chứa câu hỏi thuộc nhiều Subject khác nhau.
+
+| Method | Endpoint                   | Mô tả                        | Quyền         | Trạng thái |
+| ------ | -------------------------- | ---------------------------- | ------------- | ---------- |
+| POST   | `/api/questions/images`    | Upload ảnh câu hỏi vào R2    | Admin         | Done       |
+| GET    | `/api/exams/:examId/questions` | Lấy danh sách câu hỏi của đề | Student/Admin | Done       |
+| POST   | `/api/exams/:examId/questions` | Thêm câu hỏi vào đề thi      | Admin         | Done       |
+| GET    | `/api/questions/:id`           | Xem chi tiết câu hỏi         | Admin         | Done       |
+| PATCH  | `/api/questions/:id`           | Cập nhật câu hỏi             | Admin         | Done       |
+| PATCH  | `/api/questions/:id/order`     | Thay đổi thứ tự câu hỏi      | Admin         | Done       |
+| DELETE | `/api/questions/:id`           | Xóa câu hỏi                  | Admin         | Done       |
+| POST   | `/api/questions/:id/options`   | Thêm đáp án                  | Admin         | Done       |
+| PATCH  | `/api/questions/options/:optionId` | Cập nhật đáp án           | Admin         | Done       |
+| DELETE | `/api/questions/options/:optionId` | Xóa đáp án                | Admin         | Done       |
+
+Câu hỏi hỗ trợ:
+
+* Trắc nghiệm A/B/C/D
+* Tự luận
+* Tự luận nhiều ý (`MULTI_PART_SHORT_ANSWER`): gửi `parts`, mỗi ý gồm
+  `contentText` và `correctAnswer`. Mỗi ý là một đơn vị điểm riêng.
+* Hình ảnh
+* Đáp án đúng
+* Giải thích
+* Hướng dẫn
+* Thời gian riêng cho từng câu
+
+Ghi chú: Học sinh nhận câu hỏi qua luồng attempt đã xác thực; endpoint chi tiết theo question ID chỉ dành cho Admin. Các response dành cho học sinh không trả về đáp án đúng trước thời điểm cho phép.
+
+## 7. Assignments Module
+
+Assignments module cho phép Admin giao đề thi cho học sinh.
+
+| Method | Endpoint           | Mô tả                            | Quyền         | Trạng thái |
+| ------ | ------------------ | -------------------------------- | ------------- | ---------- |
+| POST   | `/api/assignments`     | Giao đề thi cho học sinh         | Admin         | Done       |
+| GET    | `/api/assignments`     | Xem danh sách đề được giao       | Student/Admin | Done       |
+| GET    | `/api/assignments/:id` | Xem chi tiết assignment          | Student/Admin | Done       |
+| PATCH  | `/api/assignments/:id` | Cập nhật deadline hoặc thông tin | Admin         | Done       |
+| DELETE | `/api/assignments/:id` | Hủy assignment                   | Admin         | Done       |
+
+Hỗ trợ lọc assignment theo học sinh:
+
+`GET /api/assignments?userId=123`
+
+Hỗ trợ lọc assignment theo trạng thái:
+
+`GET /api/assignments?status=OVERDUE`
+
+Các trạng thái có thể sử dụng:
+
+* PENDING
+* IN_PROGRESS
+* COMPLETED
+* OVERDUE
+
+## 8. Attempts / Submissions Module
+
+Attempts module xử lý quá trình làm bài, lưu câu trả lời, nộp bài và xem kết quả.
+
+| Method | Endpoint                  | Mô tả                        | Quyền         | Trạng thái |
+| ------ | ------------------------- | ---------------------------- | ------------- | ---------- |
+| POST   | `/api/exams/:examId/attempts` | Bắt đầu làm bài              | Student       | Done       |
+| GET    | `/api/attempts`               | Xem lịch sử làm bài          | Student/Admin | Done       |
+| GET    | `/api/attempts/:id`           | Xem chi tiết một lần làm bài | Student/Admin | Done       |
+| POST   | `/api/attempts/:id/answers`   | Gửi hoặc lưu câu trả lời     | Student       | Done       |
+| POST   | `/api/attempts/:id/submit`    | Nộp bài                      | Student       | Done       |
+| GET    | `/api/attempts/:id/result`    | Xem kết quả bài làm          | Student/Admin | Done       |
+
+Khi `SEQUENTIAL_EXAM_FLOW_ENABLED=true`, attempt mới dùng luồng tuần tự v2.
+Các endpoint v2 là:
+
+| Method | Endpoint | Mô tả |
+| ------ | -------- | ----- |
+| GET | `/api/attempts/:id/session` | Lấy câu hiện tại, tiến độ và timer do server cấp |
+| POST | `/api/attempts/:id/current-question/submit` | Chấm câu hiện tại; bắt buộc `Idempotency-Key` |
+| POST | `/api/attempts/:id/current-question/expire` | Ghi nhận hết giờ; UX giống câu trả lời sai |
+| POST | `/api/attempts/:id/current-question/continue` | Hoàn tất phản hồi và chuyển câu; bắt buộc `Idempotency-Key` |
+
+Attempt v2 không được gọi `/api/attempts/:id/answers` hoặc `/api/attempts/:id/submit`.
+Progress được khóa bằng `progressVersion` và câu hiện tại được xác định từ
+database; `questionId`, `questionIndex` và `currentQuestion` do client gửi không
+được dùng để mở khóa câu khác. Câu trả lời đúng tự động chuyển sau 3 giây,
+trong khi câu sai/hết giờ luôn cần thao tác Continue. Attempt cũ vẫn giữ
+`flowVersion=1` và contract cũ.
+
+### Kiểm thử submission flow
+
+Unit tests và build:
+
+```bash
+pnpm test
+pnpm build
+```
+
+Integration tests phải dùng PostgreSQL riêng cho test. Đặt `TEST_DATABASE_URL`
+và trỏ `DATABASE_URL` tới cùng database disposable trước khi migrate:
+
+```powershell
+$env:TEST_DATABASE_URL = 'postgresql://USER:PASSWORD@HOST:5432/course_management_test?schema=public'
+$env:DATABASE_URL = $env:TEST_DATABASE_URL
+pnpm db:deploy
+pnpm test:integration
+```
+
+Không chạy các lệnh này với database cloud proxy/development/production.
+Browser E2E nằm ở frontend và yêu cầu attempt v2 đã seed:
+
+```powershell
+$env:E2E_ENABLED = 'true'
+$env:E2E_EXAM_URL = 'http://127.0.0.1:3000/student/attempts/<attempt-id>/take'
+$env:E2E_STORAGE_STATE = 'playwright/.auth/student.json' # hoặc dùng credentials
+# Optional: one fresh attempt URL per additional scenario.
+# E2E_INCORRECT_URL, E2E_DOUBLE_SUBMIT_URL, E2E_REFRESH_URL
+pnpm test:e2e
+```
+
+Chromium là gate bắt buộc; đặt `E2E_NIGHTLY=true` để thêm Firefox/WebKit smoke.
+
+Ghi chú: Mỗi câu hỏi có thời gian riêng. Câu hỏi `SHORT_ANSWER` lưu `selectedOptionId = null`; câu hỏi trắc nghiệm chỉ chấp nhận option thuộc chính câu hỏi đó.
+
+Nếu học sinh trả lời sai hoặc hết giờ, hệ thống có thể hiển thị:
+
+* Đáp án đúng
+* Giải thích
+* Hướng dẫn
+
+Với câu tự luận nhiều ý, client gửi `parts` khi gọi endpoint nộp đáp án:
+
+```json
+{
+  "questionId": "...",
+  "progressVersion": 0,
+  "parts": [
+    { "partId": "...", "rawValue": "20.0" },
+    { "partId": "...", "rawValue": "Việt Nam" }
+  ]
+}
+```
+
+Đáp án số được so sánh theo giá trị chính xác (ví dụ `20`, `20.0`, `20.00`),
+còn văn bản không phân biệt hoa/thường, dấu tiếng Việt và khoảng trắng. Response
+feedback có `parts[].isCorrect` để tô xanh/đỏ từng ý; ý sai có thêm
+`correctAnswer`. Câu nhiều ý chỉ tự chuyển sau 3 giây khi tất cả ý đều đúng.
