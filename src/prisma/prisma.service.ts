@@ -14,11 +14,15 @@ export class PrismaService
       throw new Error('DATABASE_URL is not defined');
     }
 
+    const sslCa = process.env.DATABASE_SSL_CA?.trim();
     const adapter = new PrismaPg({
       connectionString,
       ssl:
         process.env.NODE_ENV === 'production'
-          ? { rejectUnauthorized: false }
+          ? {
+              rejectUnauthorized: true,
+              ...(sslCa ? { ca: sslCa } : {}),
+            }
           : false,
     });
 

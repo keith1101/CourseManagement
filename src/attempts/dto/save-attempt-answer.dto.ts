@@ -30,6 +30,7 @@ export class SaveAttemptAnswerDto {
 
     @IsOptional()
     @IsString()
+    // Legacy clients may still send this; the grader derives it from rawValue.
     normalizedText?: string;
 
     @IsOptional()
@@ -39,6 +40,7 @@ export class SaveAttemptAnswerDto {
     @IsOptional()
     @Type(() => Number)
     @IsNumber()
+    // Legacy clients may still send this; the grader derives it from rawValue.
     numericValue?: number;
 
     @IsOptional()

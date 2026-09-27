@@ -1,9 +1,9 @@
 import {
-    ConflictException,
     ForbiddenException,
     HttpException,
     HttpStatus,
     Injectable,
+    Logger,
     UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
@@ -17,9 +17,13 @@ import { Prisma } from '../../generated/client/client';
 import { EmailVerificationTokenService } from './email-verification-token.service';
 import { EmailService } from './email.service';
 
+const DUMMY_PASSWORD_HASH =
+    '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
 @Injectable()
 export class AuthService {
+    private readonly logger = new Logger(AuthService.name);
+
     constructor(
         private readonly prisma: PrismaService,
         private readonly jwtService: JwtService,
@@ -29,93 +33,115 @@ export class AuthService {
     ) { }
 
     async register(registerDto: RegisterDto) {
-        const { password, dateOfBirth } = registerDto;
         const email = this.normalizeEmail(registerDto.email);
+        const result = {
+            message: 'If registration is available, verification instructions will be sent.',
+            email,
+            verificationRequired: true,
+        };
 
         const existingUser = await this.prisma.user.findUnique({
             where: { email },
+            select: { id: true, emailVerifiedAt: true },
         });
 
         if (existingUser) {
             if (!existingUser.emailVerifiedAt) {
-                await this.resendVerification(email);
-
-                return {
-                    message:
-                        'Account already exists but is not verified. A new verification email has been sent.',
-                    email,
-                    verificationRequired: true,
-                };
+                try {
+                    await this.resendVerification(email);
+                } catch {
+                    // Preserve the same public response for every account state.
+                    this.logger.warn('Registration verification flow could not be processed.');
+                }
             }
-
-            throw new ConflictException('Email already exists');
+            return result;
         }
 
-        const passwordHash = await bcrypt.hash(password, 10);
         const verificationEmailRequestedAt = new Date();
 
+        let registration: {
+            user: { email: string; fullName: string };
+            rawToken: string;
+        };
         try {
-            const result = await this.prisma.$transaction(async (tx) => {
-                const user = await tx.user.create({
-                    data: {
-                        email,
-                        passwordHash,
-                        fullName: registerDto.fullName.trim(),
-                        phone: registerDto.phone?.trim() || null,
-                        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-                        emailVerifiedAt: null,
-                        verificationEmailLastRequestedAt: verificationEmailRequestedAt,
-                        verificationEmailWindowStartedAt: verificationEmailRequestedAt,
-                        verificationEmailRequestCount: 1,
-                    },
-                    select: {
-                        id: true,
-                        email: true,
-                        fullName: true,
-                        phone: true,
-                        dateOfBirth: true,
-                        role: true,
-                        isActive: true,
-                        accessLevel: true,
-                        proExpiresAt: true,
-                        createdAt: true,
-                        updatedAt: true,
-                    },
-                });
-
-                const verification = await this.emailVerificationTokenService.issue(
-                    user.id,
-                    tx,
-                );
-
-                return {
-                    user,
-                    rawToken: verification.rawToken,
-                    expiresAt: verification.expiresAt,
-                };
-            });
-
-            await this.emailService.sendVerificationEmail({
-                to: result.user.email,
-                fullName: result.user.fullName,
-                rawToken: result.rawToken,
-            });
-
-            return {
-                message: 'Registration successful. Please verify your email.',
-                email: result.user.email,
-                verificationRequired: true,
-            };
+            registration = await this.createRegistration(
+                registerDto,
+                email,
+                verificationEmailRequestedAt,
+            );
         } catch (error) {
             if (
                 error instanceof Prisma.PrismaClientKnownRequestError &&
                 error.code === 'P2002'
             ) {
-                throw new ConflictException('Email already exists');
+                return result;
             }
-
-            throw error;
+            // Keep account creation failures from becoming an email-existence
+            // oracle. Operational details remain in server-side logs only.
+            this.logger.warn('Registration could not be completed.');
+            return result;
         }
+
+        try {
+            await this.emailService.sendVerificationEmail({
+                to: registration.user.email,
+                fullName: registration.user.fullName,
+                rawToken: registration.rawToken,
+            });
+        } catch {
+            // Keep public registration responses independent of whether the
+            // address was created; delivery problems are handled on resend.
+            this.logger.warn('Verification email delivery failed during registration.');
+        }
+
+        return result;
+    }
+
+    private async createRegistration(
+        registerDto: RegisterDto,
+        email: string,
+        verificationEmailRequestedAt: Date,
+    ) {
+        const { dateOfBirth } = registerDto;
+        return this.prisma.$transaction(async (tx) => {
+            const user = await tx.user.create({
+                data: {
+                    email,
+                    passwordHash: null,
+                    fullName: registerDto.fullName.trim(),
+                    phone: registerDto.phone?.trim() || null,
+                    dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+                    emailVerifiedAt: null,
+                    verificationEmailLastRequestedAt: verificationEmailRequestedAt,
+                    verificationEmailWindowStartedAt: verificationEmailRequestedAt,
+                    verificationEmailRequestCount: 1,
+                },
+                select: {
+                    id: true,
+                    email: true,
+                    fullName: true,
+                    phone: true,
+                    dateOfBirth: true,
+                    role: true,
+                    isActive: true,
+                    accessLevel: true,
+                    proExpiresAt: true,
+                    createdAt: true,
+                    updatedAt: true,
+                },
+            });
+
+            const verification = await this.emailVerificationTokenService.issue(
+                user.id,
+                tx,
+            );
+
+            return {
+                user,
+                rawToken: verification.rawToken,
+                expiresAt: verification.expiresAt,
+            };
+        });
     }
 
     async login(loginDto: LoginDto) {
@@ -126,25 +152,19 @@ export class AuthService {
             where: { email }
         });
 
-        if (!user) {
-            throw new UnauthorizedException('Invalid email or password'); //exception
-        }
+        const isPasswordValid = await bcrypt.compare(
+            password,
+            user?.passwordHash ?? DUMMY_PASSWORD_HASH,
+        );
 
-        if (user.isActive === false) {
-            throw new ForbiddenException('Account is locked');
-        }
-
-        const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
-
-        if (!isPasswordValid) {
+        if (
+            !user ||
+            !user.passwordHash ||
+            !user.isActive ||
+            !user.emailVerifiedAt ||
+            !isPasswordValid
+        ) {
             throw new UnauthorizedException('Invalid email or password');
-        }
-
-        if (!user.emailVerifiedAt) {
-            throw new ForbiddenException({
-                code: 'EMAIL_NOT_VERIFIED',
-                message: 'Please verify your email before logging in',
-            });
         }
 
         const payload = {
@@ -231,6 +251,10 @@ export class AuthService {
             throw new ForbiddenException('Account is locked');
         }
 
+        if (!user.passwordHash) {
+            throw new UnauthorizedException('Old password is incorrect');
+        }
+
         const isOldPasswordValid = await bcrypt.compare(
             oldPassword,
             user.passwordHash,
@@ -260,9 +284,13 @@ export class AuthService {
         return email.trim().toLowerCase();
     }
 
-    async verifyEmail(rawToken: string) {
-        const { userId } =
-            await this.emailVerificationTokenService.consume(rawToken);
+    async verifyEmail(rawToken: string, password: string) {
+        await this.emailVerificationTokenService.assertUsable(rawToken);
+        const passwordHash = await bcrypt.hash(password, 10);
+        const { userId } = await this.emailVerificationTokenService.consume(
+            rawToken,
+            passwordHash,
+        );
 
         const user = await this.prisma.user.findUnique({
             where: { id: userId },
@@ -302,42 +330,100 @@ export class AuthService {
             return { message };
         }
 
-        const policy = this.getResendPolicy();
-        const now = new Date();
-        this.assertResendAllowed(user, now, policy);
+        let verification: {
+            rawToken: string;
+            email: string;
+            fullName: string;
+        } | null;
+        try {
+            verification = await this.prisma.$transaction(async (tx) => {
+                const currentUser = await tx.user.findUnique({
+                    where: { id: user.id },
+                    select: {
+                        id: true,
+                        email: true,
+                        fullName: true,
+                        emailVerifiedAt: true,
+                        verificationEmailLastRequestedAt: true,
+                        verificationEmailWindowStartedAt: true,
+                        verificationEmailRequestCount: true,
+                    },
+                });
 
-        const windowIsActive =
-            user.verificationEmailWindowStartedAt &&
-            now.getTime() - user.verificationEmailWindowStartedAt.getTime() <
-            policy.windowMs;
-        const requestCount = windowIsActive
-            ? (user.verificationEmailRequestCount ?? 0) + 1
-            : 1;
-        const windowStartedAt = windowIsActive
-            ? user.verificationEmailWindowStartedAt
-            : now;
+                if (!currentUser || currentUser.emailVerifiedAt) return null;
 
-        const verification = await this.prisma.$transaction(async (tx) => {
-            const issuedVerification =
-                await this.emailVerificationTokenService.issue(user.id, tx);
+                const policy = this.getResendPolicy();
+                const now = new Date();
+                this.assertResendAllowed(currentUser, now, policy);
 
-            await tx.user.update({
-                where: { id: user.id },
-                data: {
-                    verificationEmailLastRequestedAt: now,
-                    verificationEmailWindowStartedAt: windowStartedAt,
-                    verificationEmailRequestCount: requestCount,
-                },
+                const windowIsActive =
+                    currentUser.verificationEmailWindowStartedAt &&
+                    now.getTime() - currentUser.verificationEmailWindowStartedAt.getTime() <
+                        policy.windowMs;
+                const requestCount = windowIsActive
+                    ? currentUser.verificationEmailRequestCount + 1
+                    : 1;
+                const windowStartedAt = windowIsActive
+                    ? currentUser.verificationEmailWindowStartedAt
+                    : now;
+
+                // Compare-and-swap the policy state before issuing a token.
+                // Concurrent requests that observed the same state cannot
+                // both claim a slot or invalidate each other's email token.
+                const claimed = await tx.user.updateMany({
+                    where: {
+                        id: currentUser.id,
+                        emailVerifiedAt: null,
+                        verificationEmailLastRequestedAt:
+                            currentUser.verificationEmailLastRequestedAt,
+                        verificationEmailWindowStartedAt:
+                            currentUser.verificationEmailWindowStartedAt,
+                        verificationEmailRequestCount:
+                            currentUser.verificationEmailRequestCount,
+                    },
+                    data: {
+                        verificationEmailLastRequestedAt: now,
+                        verificationEmailWindowStartedAt: windowStartedAt,
+                        verificationEmailRequestCount: requestCount,
+                    },
+                });
+
+                if (claimed.count !== 1) {
+                    throw new HttpException(
+                        { code: 'EMAIL_RESEND_RATE_LIMITED', message },
+                        HttpStatus.TOO_MANY_REQUESTS,
+                    );
+                }
+
+                const issued = await this.emailVerificationTokenService.issue(
+                    currentUser.id,
+                    tx,
+                );
+                return {
+                    ...issued,
+                    email: currentUser.email,
+                    fullName: currentUser.fullName,
+                };
             });
+        } catch (error) {
+            if (error instanceof HttpException && error.getStatus() === HttpStatus.TOO_MANY_REQUESTS) {
+                return { message };
+            }
+            this.logger.warn('Verification resend could not be processed.');
+            return { message };
+        }
 
-            return issuedVerification;
-        });
+        if (!verification) return { message };
 
-        await this.emailService.sendVerificationEmail({
-            to: user.email,
-            fullName: user.fullName,
-            rawToken: verification.rawToken,
-        });
+        try {
+            await this.emailService.sendVerificationEmail({
+                to: verification.email,
+                fullName: verification.fullName,
+                rawToken: verification.rawToken,
+            });
+        } catch {
+            this.logger.warn('Verification email delivery failed during resend.');
+        }
 
         return { message };
     }

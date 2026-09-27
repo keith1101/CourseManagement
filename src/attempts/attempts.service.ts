@@ -219,14 +219,6 @@ export class AttemptsService {
     ) {}
 
     /**
-     * Roll out sequential attempts independently from the legacy contract.
-     * Existing attempts keep their persisted flowVersion forever.
-     */
-    private get sequentialFlowEnabled() {
-        return process.env.SEQUENTIAL_EXAM_FLOW_ENABLED === 'true';
-    }
-
-    /**
      * v2 mutations lock their ExamAttempt row before reading progress (see
      * getSequentialMutationState). Read committed is sufficient once every
      * mutation takes that same lock, and it makes concurrent submit/
@@ -370,28 +362,13 @@ export class AttemptsService {
         });
 
         if (existingAttempt) {
-            return existingAttempt.flowVersion === 2
-                ? this.getSequentialSession(existingAttempt.id, userId)
-                : this.getAttemptWithQuestions(existingAttempt.id, userId);
+            if (existingAttempt.flowVersion === 1) {
+                await this.upgradeLegacyAttempt(existingAttempt.id, userId);
+            }
+            return this.getSequentialSession(existingAttempt.id, userId);
         }
 
-        if (this.sequentialFlowEnabled) {
-            return this.createSequentialAttempt(examId, userId, assignmentId);
-        }
-
-        const totalQuestions = await this.countExamScoreUnits(this.prisma, examId);
-
-        const attempt = await this.prisma.examAttempt.create({
-            data: {
-                userId,
-                examId,
-                assignmentId,
-                totalQuestions,
-            },
-            select: { id: true },
-        });
-
-        return this.getAttemptWithQuestions(attempt.id, userId);
+        return this.createSequentialAttempt(examId, userId, assignmentId);
     }
 
     async findAll(query: AttemptQueryDto, userId?: string) {
@@ -547,15 +524,9 @@ export class AttemptsService {
             );
         }
 
-        const answerType =
-            saveAttemptAnswerDto.answerType ??
-            (saveAttemptAnswerDto.numericValue !== undefined
-                ? AnswerValueType.NUMBER
-                : AnswerValueType.TEXT);
         const rawValue =
             saveAttemptAnswerDto.rawValue ?? selectedOption?.contentText ?? '';
-        const normalizedText =
-            saveAttemptAnswerDto.normalizedText ?? this.normalize(rawValue);
+        const canonicalAnswer = this.canonicalizeAnswer(question, rawValue);
         const shouldEvaluate =
             saveAttemptAnswerDto.finalize === true ||
             saveAttemptAnswerDto.timedOut === true;
@@ -564,10 +535,8 @@ export class AttemptsService {
                 ? false
                 : this.isAnswerCorrect(question, {
                       selectedOptionId: selectedOptionId ?? null,
-                      answerType,
                       rawValue,
-                      normalizedText,
-                      numericValue: saveAttemptAnswerDto.numericValue ?? null,
+                      ...canonicalAnswer,
                   })
             : false;
 
@@ -582,13 +551,13 @@ export class AttemptsService {
         const data = {
             questionId: question.id,
             selectedOptionId: selectedOptionId ?? null,
-            answerType,
+            answerType: canonicalAnswer.answerType,
             rawValue,
-            normalizedText,
+            normalizedText: canonicalAnswer.normalizedText,
             content: saveAttemptAnswerDto.content,
             isCorrect,
             position: question.position,
-            numericValue: saveAttemptAnswerDto.numericValue,
+            numericValue: canonicalAnswer.numericValue,
         };
 
         const answer = existingAnswer
@@ -706,7 +675,119 @@ export class AttemptsService {
         return this.getSequentialSession(attemptId, userId);
     }
 
+    /**
+     * Legacy in-progress attempts have no trustworthy server-side question
+     * start times. Restart them as v2 before allowing any further mutation.
+     */
+    private async upgradeLegacyAttempt(attemptId: string, userId: string) {
+        await this.runSequentialTransaction(async (transaction) => {
+            if (typeof (transaction as any).$queryRaw === 'function') {
+                await (transaction as any).$queryRaw`
+                    SELECT "id"
+                    FROM "ExamAttempt"
+                    WHERE "id" = ${attemptId}
+                      AND "userId" = ${userId}
+                    FOR UPDATE
+                `;
+            }
+
+            const attempt = await transaction.examAttempt.findUnique({
+                where: { id: attemptId },
+                select: {
+                    id: true,
+                    userId: true,
+                    examId: true,
+                    status: true,
+                    flowVersion: true,
+                },
+            });
+            if (!attempt || attempt.userId !== userId) {
+                throw new NotFoundException('Attempt not found');
+            }
+            if (
+                attempt.flowVersion !== 1 ||
+                attempt.status !== AttemptStatus.IN_PROGRESS
+            ) {
+                return;
+            }
+
+            const questions = await transaction.question.findMany({
+                where: { examId: attempt.examId, deletedAt: null },
+                select: { id: true, position: true, timeLimitSeconds: true },
+                orderBy: [{ position: 'asc' }, { id: 'asc' }],
+            });
+            const now = new Date();
+
+            // V1 answers may have been graded from client-supplied fields and
+            // cannot safely carry forward into a server-timed attempt.
+            await transaction.attemptAnswer.deleteMany({
+                where: { attemptId },
+            });
+            await transaction.attemptQuestionProgress.deleteMany({
+                where: { attemptId },
+            });
+
+            if (questions.length === 0) {
+                await transaction.examAttempt.update({
+                    where: { id: attemptId },
+                    data: {
+                        flowVersion: 2,
+                        status: AttemptStatus.COMPLETED,
+                        submittedAt: now,
+                        correctCount: 0,
+                        totalQuestions: 0,
+                        startedAt: now,
+                        currentAttemptQuestionId: null,
+                        progressVersion: { increment: 1 },
+                    },
+                });
+                return;
+            }
+
+            await transaction.attemptQuestionProgress.createMany({
+                data: questions.map((question, index) => {
+                    const timeLimitSeconds = Math.max(
+                        1,
+                        question.timeLimitSeconds || 30,
+                    );
+                    const active = index === 0;
+                    return {
+                        attemptId,
+                        questionId: question.id,
+                        ordinal: index,
+                        timeLimitSeconds,
+                        status: active
+                            ? AttemptQuestionStatus.ACTIVE
+                            : AttemptQuestionStatus.LOCKED,
+                        activatedAt: active ? now : null,
+                        deadlineAt: active
+                            ? new Date(now.getTime() + timeLimitSeconds * 1000)
+                            : null,
+                    };
+                }),
+            });
+
+            const first = await transaction.attemptQuestionProgress.findUniqueOrThrow({
+                where: {
+                    attemptId_ordinal: { attemptId, ordinal: 0 },
+                },
+                select: { id: true },
+            });
+            await transaction.examAttempt.update({
+                where: { id: attemptId },
+                data: {
+                    flowVersion: 2,
+                    progressVersion: { increment: 1 },
+                    totalQuestions: questions.length,
+                    startedAt: now,
+                    currentAttemptQuestionId: first.id,
+                },
+            });
+        });
+    }
+
     async getSequentialSession(attemptId: string, userId: string) {
+        await this.getAttempt(attemptId, userId);
         await this.syncSequentialProgress(attemptId, userId);
 
         const attempt = (await this.prisma.examAttempt.findUnique({
@@ -1139,7 +1220,11 @@ export class AttemptsService {
                 ? this.gradeMultipartAnswers(question.questionParts, answer.partAnswers, false)
                     .filter((part) => part.isCorrect).length
                 : Number(isCorrect);
-            return [{ answer, isCorrect, correctUnits }];
+            const canonicalAnswer =
+                question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER
+                    ? null
+                    : this.canonicalizeAnswer(question, answer.rawValue);
+            return [{ answer, isCorrect, correctUnits, canonicalAnswer }];
         });
         const correctCount = evaluations.reduce(
             (total, evaluation) => total + evaluation.correctUnits,
@@ -1152,9 +1237,9 @@ export class AttemptsService {
                     where: { id: evaluation.answer.id },
                     data: {
                         isCorrect: evaluation.isCorrect,
-                        normalizedText:
-                            evaluation.answer.normalizedText ??
-                            this.normalize(evaluation.answer.rawValue),
+                        ...(evaluation.canonicalAnswer ?? {
+                            normalizedText: this.normalize(evaluation.answer.rawValue),
+                        }),
                     },
                 });
             }
@@ -1576,15 +1661,14 @@ export class AttemptsService {
             );
         }
 
-        const answerType = dto.answerType ??
-            (dto.numericValue !== undefined ? AnswerValueType.NUMBER : AnswerValueType.TEXT);
+        const canonicalAnswer = this.canonicalizeAnswer(question, rawValue);
         return {
             selectedOptionId,
-            answerType,
+            answerType: canonicalAnswer.answerType,
             rawValue,
-            normalizedText: dto.normalizedText?.trim() || this.normalize(rawValue),
+            normalizedText: canonicalAnswer.normalizedText,
             content: dto.content ?? null,
-            numericValue: dto.numericValue ?? null,
+            numericValue: canonicalAnswer.numericValue,
         };
     }
 
@@ -1784,7 +1868,7 @@ export class AttemptsService {
     }
 
     private async getAttempt(id: string, userId?: string) {
-        const attempt = await this.prisma.examAttempt.findUnique({
+        let attempt = await this.prisma.examAttempt.findUnique({
             where: { id },
             select: {
                 id: true,
@@ -1806,6 +1890,30 @@ export class AttemptsService {
             (userId && attempt.userId !== userId)
         ) {
             throw new NotFoundException('Attempt not found');
+        }
+
+        if (
+            userId &&
+            attempt.flowVersion === 1 &&
+            attempt.status === AttemptStatus.IN_PROGRESS
+        ) {
+            await this.upgradeLegacyAttempt(id, userId);
+            attempt = await this.prisma.examAttempt.findUnique({
+                where: { id },
+                select: {
+                    id: true,
+                    userId: true,
+                    examId: true,
+                    status: true,
+                    flowVersion: true,
+                    progressVersion: true,
+                    currentAttemptQuestionId: true,
+                    exam: { select: { deletedAt: true } },
+                },
+            });
+            if (!attempt || attempt.exam?.deletedAt || attempt.userId !== userId) {
+                throw new NotFoundException('Attempt not found');
+            }
         }
 
         return attempt;
@@ -1955,19 +2063,16 @@ export class AttemptsService {
             );
         }
 
-        if (
-            answer.answerType === AnswerValueType.NUMBER &&
-            answer.numericValue !== null
-        ) {
-            return question.questionAcceptedAnswers.some(
-                (acceptedAnswer) =>
-                    acceptedAnswer.numericValue !== null &&
-                    acceptedAnswer.numericValue === answer.numericValue,
-            );
+        const numericValue = this.toExactNumber(answer.rawValue);
+        if (numericValue !== null && question.questionAcceptedAnswers.some(
+            (acceptedAnswer) =>
+                acceptedAnswer.numericValue !== null &&
+                acceptedAnswer.numericValue === numericValue,
+        )) {
+            return true;
         }
 
-        const normalizedAnswer =
-            answer.normalizedText ?? this.normalize(answer.rawValue);
+        const normalizedAnswer = this.normalize(answer.rawValue);
         const correctTextAnswers = question.questionAcceptedAnswers.map(
             (acceptedAnswer) =>
                 acceptedAnswer.normalizedText ??
@@ -1982,6 +2087,25 @@ export class AttemptsService {
         }
 
         return correctTextAnswers.includes(normalizedAnswer);
+    }
+
+    private canonicalizeAnswer(question: any, rawValue: string) {
+        const hasNumericAcceptedAnswer =
+            question.questionAcceptedAnswers?.some(
+                (acceptedAnswer: any) => acceptedAnswer.numericValue !== null,
+            ) ?? false;
+        const numericValue = hasNumericAcceptedAnswer
+            ? this.toExactNumber(rawValue)
+            : null;
+
+        return {
+            answerType:
+                numericValue === null
+                    ? AnswerValueType.TEXT
+                    : AnswerValueType.NUMBER,
+            normalizedText: this.normalize(rawValue),
+            numericValue,
+        };
     }
 
     private async saveMultipartAnswer(

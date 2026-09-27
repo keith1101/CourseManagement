@@ -42,15 +42,15 @@ Trên PowerShell, dùng `Copy-Item .env.example .env` thay cho `cp` nếu cần.
 **2. Cấu hình `.env` cho PostgreSQL local**
 
 ```dotenv
-DATABASE_URL="postgresql://postgres:postgrespassword@localhost:5432/course_management_db?schema=public"
+DATABASE_URL="postgresql://postgres:replace-with-a-local-password@localhost:5432/course_management_db?schema=public"
+POSTGRES_PASSWORD="replace-with-a-local-password"
 JWT_SECRET="replace-with-a-long-random-secret"
 JWT_EXPIRES_IN="1d"
 PORT=5001
 EMAIL_PROVIDER="console"
-SEQUENTIAL_EXAM_FLOW_ENABLED=false
 ```
 
-Đây chỉ là thông tin database mẫu trong `docker-compose.yml` dành cho local. Điền các biến còn lại trong [`.env.example`](./.env.example) khi dùng R2 hoặc Gmail API. Không commit `.env` hoặc thông tin xác thực thật.
+Đặt `POSTGRES_PASSWORD` trong `DATABASE_URL` trùng với biến cùng tên trong `.env`; Compose chỉ bind PostgreSQL và Adminer vào loopback của máy local. Điền các biến còn lại trong [`.env.example`](./.env.example) khi dùng R2 hoặc Gmail API. Không commit `.env` hoặc thông tin xác thực thật.
 
 **3. Khởi động database và API**
 
@@ -63,7 +63,7 @@ pnpm dev
 
 API mặc định chạy tại **`http://localhost:5001/api`**. Kiểm tra kết nối: `GET /api/health` (trả về trạng thái API và database).
 
-Khi dùng `EMAIL_PROVIDER=console` trong môi trường development, đường dẫn xác minh email được ghi vào log backend. Môi trường production cần cấu hình nhà cung cấp email thực.
+Khi dùng `EMAIL_PROVIDER=console` trong môi trường development, đường dẫn xác minh email được ghi vào log backend. Người đăng ký đặt mật khẩu sau khi mở liên kết xác minh. Môi trường production cần cấu hình nhà cung cấp email thực.
 
 ## API chính
 
@@ -82,7 +82,7 @@ Các API nghiệp vụ yêu cầu Bearer token và kiểm tra quyền theo vai t
 
 ### Chế độ làm bài tuần tự
 
-Đặt `SEQUENTIAL_EXAM_FLOW_ENABLED=true` để **những lượt làm bài mới** sử dụng luồng v2. Client lấy câu hiện tại qua `GET /api/attempts/:id/session`, sau đó gọi các endpoint `current-question/submit`, `expire` và `continue`. Hai thao tác `submit` và `continue` yêu cầu header `Idempotency-Key`; các lượt làm bài cũ vẫn giữ luồng v1.
+Tất cả lượt làm bài mới sử dụng luồng v2. Client lấy câu hiện tại qua `GET /api/attempts/:id/session`, sau đó gọi các endpoint `current-question/submit`, `expire` và `continue`. Hai thao tác `submit` và `continue` yêu cầu header `Idempotency-Key`. Lượt v1 đang làm dở sẽ được khởi động lại theo luồng v2 khi học viên mở lại; các câu trả lời chưa nộp của lượt đó bị xóa vì không có thời điểm bắt đầu câu đáng tin cậy ở server.
 
 ## Cấu hình dịch vụ bổ sung
 

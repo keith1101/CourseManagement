@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -66,10 +65,13 @@ describe('AuthService', () => {
     user: {
       create: jest.Mock;
       update: jest.Mock;
+      findUnique: jest.Mock;
+      updateMany: jest.Mock;
     };
   };
   let tokenService: {
     issue: jest.Mock;
+    assertUsable: jest.Mock;
     consume: jest.Mock;
   };
   let emailService: {
@@ -86,6 +88,8 @@ describe('AuthService', () => {
       user: {
         create: jest.fn(),
         update: jest.fn(),
+        findUnique: jest.fn(),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
     prisma = {
@@ -107,6 +111,7 @@ describe('AuthService', () => {
         rawToken: 'raw-token',
         expiresAt: new Date(),
       }),
+      assertUsable: jest.fn().mockResolvedValue(undefined),
       consume: jest.fn(),
     };
 
@@ -134,9 +139,8 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('normalizes profile data, hashes the password, and never returns passwordHash', async () => {
+    it('normalizes profile data without storing a pre-verification password', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      hashMock.mockResolvedValue('new-password-hash');
       transactionClient.user.create.mockResolvedValue({
         ...safeUser,
         createdAt: now,
@@ -145,7 +149,6 @@ describe('AuthService', () => {
 
       const result = await service.register({
         email: '  Student@Example.COM ',
-        password: 'password123',
         fullName: '  Nguyen Van A  ',
         phone: '  0901234567  ',
         dateOfBirth: '2005-05-20',
@@ -153,13 +156,14 @@ describe('AuthService', () => {
 
       expect(prisma.user.findUnique).toHaveBeenCalledWith({
         where: { email: 'student@example.com' },
+        select: { id: true, emailVerifiedAt: true },
       });
-      expect(hashMock).toHaveBeenCalledWith('password123', 10);
+      expect(hashMock).not.toHaveBeenCalled();
       expect(transactionClient.user.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             email: 'student@example.com',
-            passwordHash: 'new-password-hash',
+            passwordHash: null,
             fullName: 'Nguyen Van A',
             phone: '0901234567',
             dateOfBirth,
@@ -179,21 +183,28 @@ describe('AuthService', () => {
         fullName: persistedUser.fullName,
         rawToken: 'raw-token',
       });
-      expect(result).not.toHaveProperty('passwordHash');
+      expect(result).toEqual({
+        message: 'If registration is available, verification instructions will be sent.',
+        email: persistedUser.email,
+        verificationRequired: true,
+      });
     });
 
-    it('throws ConflictException when the normalized email already exists', async () => {
+    it('returns the same generic response when the normalized email already exists', async () => {
       prisma.user.findUnique.mockResolvedValue(persistedUser);
 
       await expect(
         service.register({
           email: ' STUDENT@example.com ',
-          password: 'password123',
           fullName: 'Nguyen Van A',
           phone: '0901234567',
           dateOfBirth: '2005-05-20',
         }),
-      ).rejects.toBeInstanceOf(ConflictException);
+      ).resolves.toEqual({
+        message: 'If registration is available, verification instructions will be sent.',
+        email: persistedUser.email,
+        verificationRequired: true,
+      });
       expect(transactionClient.user.create).not.toHaveBeenCalled();
     });
 
@@ -202,16 +213,23 @@ describe('AuthService', () => {
         ...persistedUser,
         emailVerifiedAt: null,
       });
+      transactionClient.user.findUnique.mockResolvedValue({
+        id: persistedUser.id,
+        email: persistedUser.email,
+        fullName: persistedUser.fullName,
+        emailVerifiedAt: null,
+        verificationEmailLastRequestedAt: null,
+        verificationEmailWindowStartedAt: null,
+        verificationEmailRequestCount: 0,
+      });
 
       await expect(
         service.register({
           email: ' STUDENT@example.com ',
-          password: 'password123',
           fullName: 'New Name Should Not Replace Existing User',
         }),
       ).resolves.toEqual({
-        message:
-          'Account already exists but is not verified. A new verification email has been sent.',
+        message: 'If registration is available, verification instructions will be sent.',
         email: persistedUser.email,
         verificationRequired: true,
       });
@@ -231,7 +249,6 @@ describe('AuthService', () => {
 
     it('registers successfully with only the required fields', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      hashMock.mockResolvedValue('new-password-hash');
       transactionClient.user.create.mockResolvedValue({
         ...safeUser,
         phone: null,
@@ -240,7 +257,6 @@ describe('AuthService', () => {
 
       await service.register({
         email: 'new@example.com',
-        password: 'password123',
         fullName: 'New Student',
       });
 
@@ -261,16 +277,17 @@ describe('AuthService', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
-    it('throws ForbiddenException when the account is locked', async () => {
+    it('returns the same unauthorized response when the account is locked', async () => {
       prisma.user.findUnique.mockResolvedValue({
         ...persistedUser,
         isActive: false,
       });
+      compareMock.mockResolvedValue(false);
 
       await expect(
         service.login({ email: persistedUser.email, password: 'password123' }),
-      ).rejects.toBeInstanceOf(ForbiddenException);
-      expect(compareMock).not.toHaveBeenCalled();
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(compareMock).toHaveBeenCalled();
     });
 
     it('throws UnauthorizedException when the password is invalid', async () => {
@@ -313,7 +330,7 @@ describe('AuthService', () => {
       expect(result.user).not.toHaveProperty('passwordHash');
     });
 
-    it('blocks login when the email is not verified', async () => {
+    it('returns the same unauthorized response when the email is not verified', async () => {
       prisma.user.findUnique.mockResolvedValue({
         ...persistedUser,
         emailVerifiedAt: null,
@@ -325,11 +342,7 @@ describe('AuthService', () => {
           email: persistedUser.email,
           password: 'password123',
         }),
-      ).rejects.toMatchObject({
-        response: {
-          code: 'EMAIL_NOT_VERIFIED',
-        },
-      });
+      ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(prisma.user.update).not.toHaveBeenCalled();
       expect(jwtService.signAsync).not.toHaveBeenCalled();
     });
@@ -338,16 +351,18 @@ describe('AuthService', () => {
   describe('verifyEmail', () => {
     it('consumes the token and returns the verified email', async () => {
       tokenService.consume.mockResolvedValue({ userId: persistedUser.id });
+      hashMock.mockResolvedValue('new-password-hash');
       prisma.user.findUnique.mockResolvedValue({
         email: persistedUser.email,
       });
 
-      await expect(service.verifyEmail(' raw-token ')).resolves.toEqual({
+      await expect(service.verifyEmail(' raw-token ', 'password123')).resolves.toEqual({
         message: 'Email verified successfully. You can now log in.',
         email: persistedUser.email,
       });
 
-      expect(tokenService.consume).toHaveBeenCalledWith(' raw-token ');
+      expect(tokenService.consume).toHaveBeenCalledWith(' raw-token ', 'new-password-hash');
+      expect(tokenService.assertUsable).toHaveBeenCalledWith(' raw-token ');
       expect(prisma.user.findUnique).toHaveBeenCalledWith({
         where: { id: persistedUser.id },
         select: { email: true },
@@ -355,11 +370,13 @@ describe('AuthService', () => {
     });
 
     it('propagates an invalid token error', async () => {
-      tokenService.consume.mockRejectedValue(new Error('Invalid token'));
+      tokenService.assertUsable.mockRejectedValue(new Error('Invalid token'));
 
-      await expect(service.verifyEmail('invalid-token')).rejects.toThrow(
+      await expect(service.verifyEmail('invalid-token', 'password123')).rejects.toThrow(
         'Invalid token',
       );
+      expect(hashMock).not.toHaveBeenCalled();
+      expect(tokenService.consume).not.toHaveBeenCalled();
       expect(prisma.user.findUnique).not.toHaveBeenCalled();
     });
   });
@@ -367,6 +384,15 @@ describe('AuthService', () => {
   describe('resendVerification', () => {
     it('issues a new token and sends another email for an unverified user', async () => {
       prisma.user.findUnique.mockResolvedValue({
+        id: persistedUser.id,
+        email: persistedUser.email,
+        fullName: persistedUser.fullName,
+        emailVerifiedAt: null,
+        verificationEmailLastRequestedAt: null,
+        verificationEmailWindowStartedAt: null,
+        verificationEmailRequestCount: 0,
+      });
+      transactionClient.user.findUnique.mockResolvedValue({
         id: persistedUser.id,
         email: persistedUser.email,
         fullName: persistedUser.fullName,
@@ -436,15 +462,19 @@ describe('AuthService', () => {
         verificationEmailWindowStartedAt: new Date(Date.now() - 30_000),
         verificationEmailRequestCount: 1,
       });
+      transactionClient.user.findUnique.mockResolvedValue({
+        id: persistedUser.id,
+        email: persistedUser.email,
+        fullName: persistedUser.fullName,
+        emailVerifiedAt: null,
+        verificationEmailLastRequestedAt: lastRequestedAt,
+        verificationEmailWindowStartedAt: new Date(Date.now() - 30_000),
+        verificationEmailRequestCount: 1,
+      });
 
       await expect(
         service.resendVerification(persistedUser.email),
-      ).rejects.toMatchObject({
-        response: {
-          code: 'EMAIL_RESEND_COOLDOWN',
-          retryAfterSeconds: expect.any(Number),
-        },
-      });
+      ).resolves.toEqual({ message: 'If the account exists and is not verified, a new verification email has been sent.' });
 
       expect(tokenService.issue).not.toHaveBeenCalled();
       expect(emailService.sendVerificationEmail).not.toHaveBeenCalled();
@@ -460,15 +490,19 @@ describe('AuthService', () => {
         verificationEmailWindowStartedAt: new Date(Date.now() - 30 * 60_000),
         verificationEmailRequestCount: 5,
       });
+      transactionClient.user.findUnique.mockResolvedValue({
+        id: persistedUser.id,
+        email: persistedUser.email,
+        fullName: persistedUser.fullName,
+        emailVerifiedAt: null,
+        verificationEmailLastRequestedAt: new Date(Date.now() - 120_000),
+        verificationEmailWindowStartedAt: new Date(Date.now() - 30 * 60_000),
+        verificationEmailRequestCount: 5,
+      });
 
       await expect(
         service.resendVerification(persistedUser.email),
-      ).rejects.toMatchObject({
-        response: {
-          code: 'EMAIL_RESEND_RATE_LIMITED',
-          retryAfterSeconds: expect.any(Number),
-        },
-      });
+      ).resolves.toEqual({ message: 'If the account exists and is not verified, a new verification email has been sent.' });
 
       expect(tokenService.issue).not.toHaveBeenCalled();
       expect(emailService.sendVerificationEmail).not.toHaveBeenCalled();

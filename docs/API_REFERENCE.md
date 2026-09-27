@@ -15,8 +15,12 @@ Auth module xử lý đăng ký, đăng nhập, xác thực người dùng và q
 | GET    | `/api/auth/me`              | Lấy thông tin người dùng đang đăng nhập | Student/Admin | Done       |
 | PATCH  | `/api/auth/change-password` | Đổi mật khẩu                            | Student/Admin | Done       |
 
-Tài khoản đăng ký mới phải xác nhận email trước khi đăng nhập. Khi phát triển local,
-có thể đặt `EMAIL_PROVIDER="console"` để in verification URL trong log backend.
+Đăng ký chỉ ghi nhận email và thông tin hồ sơ; không nhận mật khẩu. Sau khi mở
+verification URL, người dùng đặt mật khẩu trong yêu cầu xác nhận email. Vì vậy,
+mật khẩu chỉ được lưu cùng lúc với việc xác nhận quyền kiểm soát hộp thư.
+Phản hồi đăng ký và gửi lại email luôn chung chung để không tiết lộ trạng thái
+tài khoản. Khi phát triển local, có thể đặt `EMAIL_PROVIDER="console"` để in
+verification URL trong log backend.
 Khi gửi email thật bằng Gmail API, đặt `EMAIL_PROVIDER="gmail"` và cấu hình
 `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`,
 `GMAIL_SENDER_EMAIL`. Gmail API sử dụng OAuth2 với scope
@@ -26,8 +30,9 @@ khi đăng ký): mặc định chờ 60 giây giữa hai lần yêu cầu và t�
 60 phút. Có thể điều chỉnh bằng
 `EMAIL_RESEND_COOLDOWN_SECONDS`, `EMAIL_RESEND_MAX_ATTEMPTS` và
 `EMAIL_RESEND_WINDOW_MINUTES`.
-Nếu email đã tồn tại nhưng chưa xác minh, đăng ký lại sẽ phát hành token mới và gửi
-lại email xác nhận; email đã xác minh vẫn trả về lỗi trùng email.
+Đăng ký trả về cùng một phản hồi công khai dù địa chỉ email mới, đã xác minh hay
+đang chờ xác minh. Với tài khoản chưa xác minh, hệ thống có thể gửi token mới nếu
+yêu cầu còn trong giới hạn theo email.
 
 ## 2. Users Module
 
@@ -228,8 +233,7 @@ Attempts module xử lý quá trình làm bài, lưu câu trả lời, nộp bà
 | POST   | `/api/attempts/:id/submit`    | Nộp bài                      | Student       | Done       |
 | GET    | `/api/attempts/:id/result`    | Xem kết quả bài làm          | Student/Admin | Done       |
 
-Khi `SEQUENTIAL_EXAM_FLOW_ENABLED=true`, attempt mới dùng luồng tuần tự v2.
-Các endpoint v2 là:
+Tất cả attempt mới dùng luồng tuần tự v2. Các endpoint v2 là:
 
 | Method | Endpoint | Mô tả |
 | ------ | -------- | ----- |
@@ -242,8 +246,9 @@ Attempt v2 không được gọi `/api/attempts/:id/answers` hoặc `/api/attemp
 Progress được khóa bằng `progressVersion` và câu hiện tại được xác định từ
 database; `questionId`, `questionIndex` và `currentQuestion` do client gửi không
 được dùng để mở khóa câu khác. Câu trả lời đúng tự động chuyển sau 3 giây,
-trong khi câu sai/hết giờ luôn cần thao tác Continue. Attempt cũ vẫn giữ
-`flowVersion=1` và contract cũ.
+trong khi câu sai/hết giờ luôn cần thao tác Continue. Attempt v1 còn đang làm dở
+sẽ được khởi động lại bằng v2 khi học viên mở lại; các câu chưa nộp bị xóa vì
+server không có thời điểm bắt đầu câu đáng tin cậy để tiếp tục đếm giờ.
 
 ### Kiểm thử submission flow
 

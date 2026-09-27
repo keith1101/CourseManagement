@@ -43,7 +43,7 @@ export class AuthController {
     @HttpCode(HttpStatus.OK)
     @Post('verify-email')
     verifyEmail(@Body() dto: VerifyEmailDto) {
-        return this.authService.verifyEmail(dto.token);
+        return this.authService.verifyEmail(dto.token, dto.password);
     }
 
     @HttpCode(HttpStatus.ACCEPTED)
