@@ -77,15 +77,19 @@ export class UsersService {
             throw new ForbiddenException('Cannot change your own permissions');
         }
 
-        await this.find(id);
+        const existingUser = await this.find(id);
 
         const { dateOfBirth, proExpiresAt, isActive, ...rest } = updateUsersDto;
+        const securityStateChanged =
+            (updateUsersDto.role !== undefined && updateUsersDto.role !== existingUser.role) ||
+            (isActive !== undefined && isActive !== existingUser.isActive);
 
         return this.prismaService.user.update({
             where: { id },
             data: {
                 ...rest,
                 ...(isActive === undefined ? {} : { isActive }),
+                ...(securityStateChanged ? { tokenVersion: { increment: 1 } } : {}),
                 dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
                 proExpiresAt: proExpiresAt === undefined ? undefined : proExpiresAt ? new Date(proExpiresAt) : null,
             },
@@ -102,7 +106,7 @@ export class UsersService {
 
         return this.prismaService.user.update({
             where: { id },
-            data: { isActive: false },
+            data: { isActive: false, tokenVersion: { increment: 1 } },
             select: safeUserSelect,
         });
     }
@@ -112,7 +116,7 @@ export class UsersService {
 
         return this.prismaService.user.update({
             where: { id },
-            data: { isActive: true },
+            data: { isActive: true, tokenVersion: { increment: 1 } },
             select: safeUserSelect,
         });
     }

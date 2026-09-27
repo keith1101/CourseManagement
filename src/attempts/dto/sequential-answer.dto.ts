@@ -35,6 +35,7 @@ export class SequentialAnswerDto {
 
     @IsOptional()
     @IsString()
+    // Legacy clients may still send this; the grader derives it from rawValue.
     normalizedText?: string;
 
     @IsOptional()
@@ -44,6 +45,7 @@ export class SequentialAnswerDto {
     @IsOptional()
     @Type(() => Number)
     @IsNumber()
+    // Legacy clients may still send this; the grader derives it from rawValue.
     numericValue?: number;
 
     @IsOptional()

@@ -17,10 +17,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  async validate(payload: { sub: string; email: string; role: string; tokenVersion?: number }) {
+  async validate(payload: {
+    sub: string;
+    email: string;
+    role: string;
+    tokenVersion?: number;
+  }) {
     const user = await this.prismaService.user.findUnique({
       where: { id: payload.sub },
-      select: { tokenVersion: true },
+      select: { tokenVersion: true, role: true, isActive: true },
     });
 
     if (!user) {
@@ -31,7 +36,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Session revoked');
     }
 
-    return payload;
-  }
+    if (!user.isActive || payload.role !== user.role) {
+      throw new UnauthorizedException('Session revoked');
+    }
 
+    return { ...payload, role: user.role };
+  }
 }

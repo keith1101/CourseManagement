@@ -94,7 +94,7 @@ describe('UsersService', () => {
     expect(prisma.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: safeUser.id },
-        data: { isActive: value },
+        data: { isActive: value, tokenVersion: { increment: 1 } },
       }),
     );
   });

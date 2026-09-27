@@ -53,7 +53,10 @@ export class EmailVerificationTokenService {
         };
     }
 
-    async consume(rawToken: string): Promise<{ userId: string }> {
+    async consume(
+        rawToken: string,
+        passwordHash: string,
+    ): Promise<{ userId: string }> {
         const token = rawToken.trim();
 
         if (!token) {
@@ -88,15 +91,20 @@ export class EmailVerificationTokenService {
                 throw this.invalidToken();
             }
 
-            await tx.user.updateMany({
+            const verifiedUser = await tx.user.updateMany({
                 where: {
                     id: storedToken.userId,
                     emailVerifiedAt: null,
                 },
                 data: {
                     emailVerifiedAt: now,
+                    passwordHash,
                 },
             });
+
+            if (verifiedUser.count !== 1) {
+                throw this.invalidToken();
+            }
 
             await tx.emailVerificationToken.deleteMany({
                 where: {
@@ -110,6 +118,29 @@ export class EmailVerificationTokenService {
             };
         });
     }
+
+    /** Validate before bcrypt so random public requests cannot force password hashing. */
+    async assertUsable(rawToken: string): Promise<void> {
+        const token = rawToken.trim();
+        if (!token) {
+            throw this.invalidToken();
+        }
+
+        const storedToken = await this.prisma.emailVerificationToken.findUnique({
+            where: { tokenHash: this.hashToken(token) },
+            select: { usedAt: true, expiresAt: true },
+        });
+        const now = new Date();
+
+        if (
+            !storedToken ||
+            storedToken.usedAt ||
+            storedToken.expiresAt <= now
+        ) {
+            throw this.invalidToken();
+        }
+    }
+
     private hashToken(rawToken: string): string {
         return createHash('sha256').update(rawToken, 'utf8').digest('hex');
     }
