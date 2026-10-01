@@ -8,6 +8,7 @@ import {
   Post,
   Query,
   Request,
+  StreamableFile,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '../../generated/client/client';
@@ -18,6 +19,7 @@ import { CreateExamDto } from './dto/create-exam.dto';
 import { ExamQueryDto } from './dto/exam-query.dto';
 import { UpdateExamDto } from './dto/update-exam.dto';
 import { ExamsService } from './exams.service';
+import { ExamPdfService } from './exam-pdf.service';
 
 type AuthenticatedRequest = {
   user: {
@@ -32,7 +34,10 @@ type Viewer = AuthenticatedRequest['user'];
 @Roles(UserRole.ADMIN, UserRole.STUDENT)
 @Controller('exams')
 export class ExamsController {
-  constructor(private readonly examsService: ExamsService) {}
+  constructor(
+    private readonly examsService: ExamsService,
+    private readonly examPdfService: ExamPdfService,
+  ) {}
 
   @Post()
   @Roles(UserRole.ADMIN)
@@ -54,6 +59,16 @@ export class ExamsController {
     @Request() request: AuthenticatedRequest,
   ) {
     return this.examsService.findOne(id, this.viewer(request.user));
+  }
+
+  @Get(':id/pdf')
+  @Roles(UserRole.ADMIN)
+  async exportPdf(@Param('id') id: string) {
+    const { filename, buffer } = await this.examPdfService.generate(id);
+    return new StreamableFile(buffer, {
+      type: 'application/pdf',
+      disposition: `attachment; filename="${filename}"`,
+    });
   }
 
   @Patch(':id')

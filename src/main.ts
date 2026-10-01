@@ -20,6 +20,7 @@ async function bootstrap() {
       ...configuredFrontendOrigins,
     ],
     credentials: true,
+    exposedHeaders: ['Content-Disposition'],
   });
 
   app.setGlobalPrefix('api');

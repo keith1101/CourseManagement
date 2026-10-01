@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ROLES_KEY } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ExamsController } from './exams.controller';
+import { ExamPdfService } from './exam-pdf.service';
 import { ExamsService } from './exams.service';
 
 describe('ExamsController', () => {
@@ -14,7 +15,10 @@ describe('ExamsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [ExamsController],
-      providers: [{ provide: ExamsService, useValue: {} }],
+      providers: [
+        { provide: ExamsService, useValue: {} },
+        { provide: ExamPdfService, useValue: {} },
+      ],
     }).compile();
 
     controller = module.get(ExamsController);
@@ -43,6 +47,9 @@ describe('ExamsController', () => {
       UserRole.ADMIN,
     ]);
     expect(Reflect.getMetadata(ROLES_KEY, ExamsController.prototype.remove)).toEqual([
+      UserRole.ADMIN,
+    ]);
+    expect(Reflect.getMetadata(ROLES_KEY, ExamsController.prototype.exportPdf)).toEqual([
       UserRole.ADMIN,
     ]);
   });

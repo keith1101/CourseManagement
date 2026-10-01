@@ -78,6 +78,8 @@ Khi dùng `EMAIL_PROVIDER=console` trong môi trường development, đường d
 | Assignments | `POST /api/assignments`, `GET /api/assignments` |
 | Attempts | `POST /api/exams/:examId/attempts`, `GET /api/attempts/:id/result` |
 
+Admin có thể tải một đề đầy đủ câu hỏi và bảng đáp án cuối trang bằng `GET /api/exams/:id/pdf`.
+
 Các API nghiệp vụ yêu cầu Bearer token và kiểm tra quyền theo vai trò. Xem [API reference](./docs/API_REFERENCE.md) để biết danh sách endpoint và hành vi chi tiết.
 
 ### Chế độ làm bài tuần tự

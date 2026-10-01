@@ -171,6 +171,29 @@ export class R2StorageService {
     }
   }
 
+  async download(storageReference: string): Promise<Buffer> {
+    const key = this.toObjectKey(storageReference);
+    if (!key) {
+      throw new NotFoundException('Object is not available in R2 storage');
+    }
+    this.assertConfigured();
+
+    try {
+      const response = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: key }),
+      );
+      if (!response.Body) {
+        throw new Error('Storage returned an empty object body');
+      }
+      return Buffer.from(await response.Body.transformToByteArray());
+    } catch (error) {
+      this.logStorageFailure('download', { objectKey: key }, error);
+      throw new InternalServerErrorException(
+        'Unable to download file from object storage',
+      );
+    }
+  }
+
   /**
    * Resolve a stored reference for API responses.  Old GCS references are
    * deliberately returned as null because the application no longer has GCS

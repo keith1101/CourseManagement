@@ -127,7 +127,7 @@ describe('AttemptsService', () => {
       },
       attemptQuestionProgress: {
         findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(),
-        createMany: jest.fn(), update: jest.fn(), count: jest.fn(),
+        findUniqueOrThrow: jest.fn(), createMany: jest.fn(), update: jest.fn(), count: jest.fn(),
       },
       question: { count: jest.fn(), findFirst: jest.fn(), findMany: jest.fn() },
       questionPart: { findMany: jest.fn().mockResolvedValue([]) },
@@ -136,10 +136,7 @@ describe('AttemptsService', () => {
       attemptAnswer: {
         findFirst: jest.fn(), create: jest.fn(), update: jest.fn(), findMany: jest.fn(),
       },
-      $transaction: jest.fn((callback: (tx: any) => unknown) => callback({
-        attemptAnswer: { update: jest.fn() },
-        examAttempt: { update: jest.fn() },
-      })),
+      $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     gcsStorage = {
       resolveReadUrl: jest.fn(async (storageUri: string | null | undefined) => ({
@@ -187,16 +184,32 @@ describe('AttemptsService', () => {
       dueAt: new Date(Date.now() + 60_000),
     });
     prisma.examAttempt.findFirst.mockResolvedValue(null);
-    prisma.question.findMany
-      .mockResolvedValueOnce([
-        { questionType: QuestionType.MULTIPLE_CHOICE, questionParts: [] },
-      ])
-      .mockResolvedValueOnce([]);
+    prisma.question.findMany.mockResolvedValue([
+      {
+        id: 'question-1',
+        position: 0,
+        timeLimitSeconds: 30,
+        questionType: QuestionType.MULTIPLE_CHOICE,
+        questionParts: [],
+      },
+    ]);
     prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    prisma.attemptQuestionProgress.findUniqueOrThrow.mockResolvedValue({ id: 'progress-1' });
     prisma.examAttempt.findUnique
-      .mockResolvedValueOnce({ id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS })
-      .mockResolvedValueOnce({ id: 'attempt-1', examId: 'exam-1', attemptedAnswers: [] });
-    prisma.question.findMany.mockResolvedValue([]);
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+        flowVersion: 2, progressVersion: 0, currentAttemptQuestionId: 'progress-1', exam: { deletedAt: null },
+      })
+      .mockResolvedValueOnce({
+        userId: 'student-1', flowVersion: 2, status: AttemptStatus.IN_PROGRESS,
+        currentAttemptQuestion: { status: 'ACTIVE', deadlineAt: new Date(Date.now() + 60_000), advanceAfter: null },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+        flowVersion: 2, progressVersion: 0, totalQuestions: 1, startedAt: new Date(),
+        currentAttemptQuestionId: 'progress-1', exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
+        currentAttemptQuestion: null, attemptQuestionProgress: [],
+      });
 
     const result = await service.start('exam-1', 'student-1', {});
 
@@ -210,7 +223,9 @@ describe('AttemptsService', () => {
         }),
       }),
     );
-    expect(result).toEqual(expect.objectContaining({ id: 'attempt-1', questions: [] }));
+    expect(result).toEqual(expect.objectContaining({
+      id: 'attempt-1', flowVersion: 2, currentQuestion: null, navigator: [],
+    }));
   });
 
   it('retries PostgreSQL serialization failures reported by the Prisma adapter', async () => {
@@ -376,18 +391,32 @@ describe('AttemptsService', () => {
     prisma.user.findUnique.mockResolvedValue({ accessLevel: 'FREE', proExpiresAt: null });
     prisma.examAssignment.findFirst.mockResolvedValue(null);
     prisma.examAttempt.findFirst.mockResolvedValue(null);
-    prisma.question.findMany
-      .mockResolvedValueOnce([
-        { questionType: QuestionType.MULTIPLE_CHOICE, questionParts: [] },
-      ])
-      .mockResolvedValueOnce([]);
+    prisma.question.findMany.mockResolvedValue([
+      {
+        id: 'question-1', position: 0, timeLimitSeconds: 30,
+        questionType: QuestionType.MULTIPLE_CHOICE, questionParts: [],
+      },
+    ]);
     prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    prisma.attemptQuestionProgress.findUniqueOrThrow.mockResolvedValue({ id: 'progress-1' });
     prisma.examAttempt.findUnique
-      .mockResolvedValueOnce({ id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS })
-      .mockResolvedValueOnce({ id: 'attempt-1', examId: 'exam-1', attemptedAnswers: [] });
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+        flowVersion: 2, progressVersion: 0, currentAttemptQuestionId: 'progress-1', exam: { deletedAt: null },
+      })
+      .mockResolvedValueOnce({
+        userId: 'student-1', flowVersion: 2, status: AttemptStatus.IN_PROGRESS,
+        currentAttemptQuestion: { status: 'ACTIVE', deadlineAt: new Date(Date.now() + 60_000), advanceAfter: null },
+      })
+      .mockResolvedValueOnce({
+        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+        flowVersion: 2, progressVersion: 0, totalQuestions: 1, startedAt: new Date(),
+        currentAttemptQuestionId: 'progress-1', exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
+        currentAttemptQuestion: null, attemptQuestionProgress: [],
+      });
 
     await expect(service.start('exam-1', 'student-1', {})).resolves.toEqual(
-      expect.objectContaining({ id: 'attempt-1', questions: [] }),
+      expect.objectContaining({ id: 'attempt-1', flowVersion: 2, currentQuestion: null }),
     );
     expect(prisma.examAttempt.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -557,28 +586,42 @@ describe('AttemptsService', () => {
       dueAt: new Date(Date.now() + 60_000),
     });
     prisma.examAttempt.findFirst.mockResolvedValue(null);
-    prisma.question.count.mockResolvedValue(1);
+    prisma.question.findMany.mockResolvedValue([
+      {
+        id: 'question-1', position: 0, timeLimitSeconds: 30,
+        questionType: QuestionType.MULTIPLE_CHOICE, questionParts: [],
+      },
+    ]);
     prisma.examAttempt.create.mockResolvedValue({ id: 'attempt-1' });
+    prisma.attemptQuestionProgress.findUniqueOrThrow.mockResolvedValue({ id: 'progress-1' });
     prisma.examAttempt.findUnique
       .mockResolvedValueOnce({
         id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
-        exam: { deletedAt: null },
+        flowVersion: 2, progressVersion: 0, currentAttemptQuestionId: 'progress-1', exam: { deletedAt: null },
       })
       .mockResolvedValueOnce({
-        id: 'attempt-1', userId: 'student-1', examId: 'exam-1', assignmentId: 'assignment-1',
-        status: AttemptStatus.IN_PROGRESS, submittedAt: null, correctCount: 0, totalQuestions: 1,
-        startedAt: new Date(), createdAt: new Date(), updatedAt: new Date(),
-        user: { id: 'student-1', fullName: 'Student', email: 'student@example.com' },
-        exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
-        assignment: { id: 'assignment-1', assignedAt: new Date(), dueAt: new Date(Date.now() + 60_000) },
-        attemptedAnswers: [],
+        userId: 'student-1', flowVersion: 2, status: AttemptStatus.IN_PROGRESS,
+        currentAttemptQuestion: { status: 'ACTIVE', deadlineAt: new Date(Date.now() + 60_000), advanceAfter: null },
       });
-    prisma.question.findMany.mockResolvedValue([questionWithAnswerData]);
+    prisma.examAttempt.findUnique.mockResolvedValueOnce({
+      id: 'attempt-1', userId: 'student-1', examId: 'exam-1', status: AttemptStatus.IN_PROGRESS,
+      flowVersion: 2, progressVersion: 0, totalQuestions: 1, startedAt: new Date(),
+      currentAttemptQuestionId: 'progress-1', exam: { id: 'exam-1', title: 'Exam', status: 'PUBLISHED' },
+      currentAttemptQuestion: {
+        id: 'progress-1', attemptId: 'attempt-1', questionId: 'question-1', ordinal: 0,
+        timeLimitSeconds: 30, status: 'ACTIVE', activatedAt: new Date(), deadlineAt: new Date(Date.now() + 60_000),
+        submittedAt: null, advanceAfter: null, completedAt: null, isCorrect: null, timedOut: false, lastAdvanceKey: null,
+        question: questionWithAnswerData,
+      },
+      attemptQuestionProgress: [],
+    });
 
     const result = await service.start('exam-1', 'student-1', { assignmentId: 'assignment-1' });
 
     expect(forbiddenStudentKeys(result)).toEqual([]);
-    expect(result.questions).toHaveLength(1);
+    expect(result.currentQuestion).toEqual(expect.objectContaining({
+      question: expect.objectContaining({ questionType: QuestionType.MULTIPLE_CHOICE }),
+    }));
   });
 
   it('uses least disclosure for completed results', async () => {

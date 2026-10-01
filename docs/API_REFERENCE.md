@@ -153,6 +153,7 @@ Exams module quản lý đề thi độc lập với Subject. Mỗi Question tro
 | DELETE | `/api/exams/:id`           | Xóa đề thi                         | Admin         | Done       |
 | PATCH  | `/api/exams/:id/publish`   | Công khai đề thi                   | Admin         | Done       |
 | PATCH  | `/api/exams/:id/unpublish` | Chuyển đề thi về trạng thái Draft | Admin         | Done       |
+| GET    | `/api/exams/:id/pdf`       | Tải đề và bảng đáp án dạng PDF     | Admin         | Done       |
 
 Hỗ trợ lọc đề thi theo trạng thái:
 
@@ -161,6 +162,8 @@ Hỗ trợ lọc đề thi theo trạng thái:
 `GET /api/exams?status=DRAFT`
 
 Student chỉ thấy Exam `PUBLISHED` và được phép theo `accessLevel`: mọi Student active có thể xem/làm đề `FREE`, còn đề `PRO` yêu cầu Student PRO còn hạn. Assignment là luồng giao bài có deadline, không phải điều kiện mở đề FREE công khai. Admin có thể lọc mọi trạng thái. Exam trả về số lượng câu hỏi và dữ liệu liên quan, không trả Questions hoặc đáp án trong response danh sách/chi tiết. DELETE Exam là soft delete: đề thi, câu hỏi, assignments và attempts liên quan không còn xuất hiện qua các API thông thường.
+
+Admin có thể tải đề PDF bằng `GET /api/exams/:id/pdf`. PDF giữ tên đề và thứ tự câu hỏi như trên web, hiển thị nội dung, ảnh, lựa chọn trắc nghiệm và có trang bảng đáp án ở cuối. Câu tự luận hiển thị đáp án được chấp nhận nếu có; câu nhiều ý hiển thị đáp án cho từng ý. Ảnh được tải từ R2 hoặc nhúng từ URL HTTP(S) công khai; URL ảnh ngoài bị giới hạn kích thước và chỉ truy cập host có địa chỉ IP công khai.
 
 ## 6. Questions Module
 
