@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import {
+  BadRequestException,
   Injectable,
   NotFoundException,
   ServiceUnavailableException,
@@ -17,6 +18,47 @@ type PdfOption = {
   contentText: string;
   imageUrl: string | null;
   isCorrect: boolean;
+};
+
+type PdfImage = {
+  buffer: Buffer;
+  width: number;
+  height: number;
+};
+
+type PreparedPdfOption = PdfOption & {
+  image: PdfImage | null;
+};
+
+type PreparedPdfQuestion = PdfQuestion & {
+  image: PdfImage | null;
+  questionOptions: PreparedPdfOption[];
+};
+
+type TextLine = {
+  text: string;
+  indent: number;
+};
+
+type ImagePlacement = {
+  image: PdfImage;
+  width: number;
+  height: number;
+};
+
+type OptionLayout = {
+  label: string;
+  lines: TextLine[];
+  height: number;
+  sourceImage: PdfImage | null;
+  image: ImagePlacement | null;
+};
+
+type QuestionLayout = {
+  height: number;
+  promptLines: TextLine[];
+  questionImage: ImagePlacement | null;
+  options: OptionLayout[];
 };
 
 type PdfQuestion = {
@@ -43,7 +85,16 @@ type PdfQuestion = {
 const PAGE = { width: 595.28, height: 841.89 };
 const MARGIN = 48;
 const CONTENT_WIDTH = PAGE.width - MARGIN * 2;
-const MAX_IMAGE_SIZE = { width: CONTENT_WIDTH - 28, height: 230 };
+const QUESTION_BLOCK_GAP = 16;
+const QUESTION_BLOCK_PADDING = 12;
+const QUESTION_LABEL_HEIGHT = 18;
+const QUESTION_TEXT_SIZE = 10.5;
+const OPTION_TEXT_SIZE = 10;
+const QUESTION_LINE_HEIGHT = 15;
+const OPTION_LINE_HEIGHT = 14;
+const QUESTION_IMAGE_MAX_HEIGHT = 220;
+const OPTION_IMAGE_MAX_HEIGHT = 96;
+const MIN_IMAGE_HEIGHT = 42;
 const LABELS = ['A', 'B', 'C', 'D'];
 const MAX_REMOTE_IMAGE_BYTES = 8 * 1024 * 1024;
 
@@ -114,84 +165,18 @@ export class ExamPdfService {
       doc.once('error', reject);
     });
 
-    doc.font(this.regularFont);
-    this.drawTitle(doc, exam.title);
-
     const questions = exam.questions as PdfQuestion[];
+    const preparedQuestions: PreparedPdfQuestion[] = [];
+    for (const question of questions) {
+      preparedQuestions.push(await this.prepareQuestion(doc, question));
+    }
     const answerRows: Array<{ number: number; answer: string }> = [];
 
     for (const [index, question] of questions.entries()) {
-      const number = index + 1;
-      this.ensureSpace(doc, 74);
-      doc.moveDown(0.8);
-      doc.font(this.boldFont).fontSize(12).fillColor('#173b63');
-      this.writeText(doc, `Câu ${number}`, { width: CONTENT_WIDTH }, true);
-      doc.moveDown(0.25);
-
-      doc.font(this.regularFont).fontSize(10.5).fillColor('#202833');
-      const prompt = question.instruction
-        ? `${question.instruction}\n${question.contentText}`
-        : question.contentText;
-      this.writeText(doc, prompt, { width: CONTENT_WIDTH });
-      doc.moveDown(0.35);
-
-      await this.drawImage(doc, question.imageUrl);
-
-      let answer = 'Tự luận';
-      if (question.questionType === QuestionType.MULTIPLE_CHOICE) {
-        for (const [optionIndex, option] of question.questionOptions.entries()) {
-          this.ensureSpace(doc, 30);
-          const label = LABELS[optionIndex] ?? String.fromCharCode(65 + optionIndex);
-          doc.font(this.boldFont).fontSize(10.5).fillColor('#283a4e');
-          const optionY = doc.y;
-          this.writeText(doc, `${label}.`, {
-            x: MARGIN,
-            y: optionY,
-            width: 25,
-          }, true);
-          doc.font(this.regularFont).fillColor('#202833');
-          this.writeText(doc, option.contentText, {
-            x: MARGIN + 25,
-            y: optionY,
-            width: CONTENT_WIDTH - 25,
-          });
-          doc.y = Math.max(doc.y, optionY + doc.currentLineHeight(true));
-          doc.moveDown(0.1);
-          await this.drawImage(doc, option.imageUrl, 26);
-          if (option.isCorrect && answer === 'Tự luận') answer = label;
-        }
-        if (answer === 'Tự luận') answer = 'Chưa thiết lập đáp án';
-      } else if (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER) {
-        question.questionParts.forEach((part, partIndex) => {
-          this.ensureSpace(doc, 34);
-          doc.font(this.regularFont).fontSize(10).fillColor('#202833');
-          this.writeText(doc, `${String.fromCharCode(97 + partIndex)}) ${part.contentText}`, {
-            width: CONTENT_WIDTH - 12,
-            indent: 12,
-          });
-          doc.moveDown(0.2);
-        });
-        answer = question.questionParts.length
-          ? question.questionParts
-              .map((part, partIndex) => `${String.fromCharCode(97 + partIndex)}) ${part.correctAnswer}`)
-              .join('; ')
-          : 'Chưa thiết lập đáp án';
-      } else {
-        question.questionParts.forEach((part, partIndex) => {
-          this.ensureSpace(doc, 34);
-          doc.font(this.regularFont).fontSize(10).fillColor('#202833');
-          this.writeText(doc, `${String.fromCharCode(97 + partIndex)}) ${part.contentText}`, {
-            width: CONTENT_WIDTH - 12,
-            indent: 12,
-          });
-          doc.moveDown(0.2);
-        });
-        const accepted = question.questionAcceptedAnswers[0];
-        if (accepted) answer = accepted.content || accepted.rawValue;
-        else if (question.correctTextAnswer) answer = question.correctTextAnswer;
-      }
-      answerRows.push({ number, answer });
+      answerRows.push({ number: index + 1, answer: this.answerFor(question) });
     }
+
+    await this.drawQuestionPages(doc, exam.title, preparedQuestions);
 
     doc.addPage();
     this.drawTitle(doc, exam.title, 'BẢNG ĐÁP ÁN');
@@ -202,6 +187,349 @@ export class ExamPdfService {
       filename: `${this.safeFilename(exam.title)}.pdf`,
       buffer: await pdfBuffer,
     };
+  }
+
+  private async prepareQuestion(
+    doc: PDFKit.PDFDocument,
+    question: PdfQuestion,
+  ): Promise<PreparedPdfQuestion> {
+    return {
+      ...question,
+      image: await this.prepareImage(doc, question.imageUrl),
+      questionOptions: await Promise.all(
+        question.questionOptions.map(async (option) => ({
+          ...option,
+          image: await this.prepareImage(doc, option.imageUrl),
+        })),
+      ),
+    };
+  }
+
+  private async prepareImage(
+    doc: PDFKit.PDFDocument,
+    imageReference: string | null | undefined,
+  ): Promise<PdfImage | null> {
+    if (!imageReference) return null;
+
+    let source: Buffer;
+    try {
+      source = this.storage.isManagedObjectKey(imageReference)
+        ? await this.storage.download(imageReference)
+        : await this.downloadPublicImage(imageReference);
+      const buffer = await sharp(source, { limitInputPixels: 20_000_000 })
+        .rotate()
+        .png()
+        .toBuffer();
+      const opened = (doc as PDFKit.PDFDocument & {
+        openImage: (value: Buffer) => { width: number; height: number };
+      }).openImage(buffer);
+      return { buffer, width: opened.width, height: opened.height };
+    } catch {
+      throw new ServiceUnavailableException(
+        'Không thể tải hoặc xử lý ảnh để xuất PDF. Vui lòng kiểm tra ảnh và thử lại.',
+      );
+    }
+  }
+
+  private drawQuestionPages(
+    doc: PDFKit.PDFDocument,
+    title: string,
+    questions: PreparedPdfQuestion[],
+  ) {
+    if (!questions.length) {
+      const top = this.beginQuestionPage(doc, title, true);
+      doc.font(this.regularFont).fontSize(10).fillColor('#566273');
+      this.drawTextLines(
+        doc,
+        this.getTextLines(doc, 'Đề thi chưa có câu hỏi.', CONTENT_WIDTH, 10),
+        MARGIN,
+        top + 16,
+        14,
+        10,
+      );
+      return;
+    }
+
+    let questionIndex = 0;
+    let firstPage = true;
+
+    while (questionIndex < questions.length) {
+      const top = this.beginQuestionPage(doc, title, firstPage);
+      firstPage = false;
+      const availableHeight = PAGE.height - MARGIN - top;
+      const halfHeight = (availableHeight - QUESTION_BLOCK_GAP) / 2;
+      const firstQuestion = questions[questionIndex];
+      const secondQuestion = questions[questionIndex + 1];
+
+      if (!secondQuestion) {
+        const fullLayout = this.layoutQuestion(doc, firstQuestion, availableHeight);
+        if (!fullLayout) {
+          throw new BadRequestException(
+            `Câu ${questionIndex + 1} quá dài để xuất gọn trong một trang PDF`,
+          );
+        }
+        this.drawQuestionBlock(
+          doc,
+          fullLayout,
+          questionIndex + 1,
+          top,
+          availableHeight,
+        );
+        questionIndex += 1;
+        continue;
+      }
+
+      const firstLayout = this.layoutQuestion(doc, firstQuestion, halfHeight);
+
+      if (!firstLayout) {
+        const fullLayout = this.layoutQuestion(doc, firstQuestion, availableHeight);
+        if (!fullLayout) {
+          throw new BadRequestException(
+            `Câu ${questionIndex + 1} quá dài để xuất gọn trong một trang PDF`,
+          );
+        }
+        this.drawQuestionBlock(doc, fullLayout, questionIndex + 1, top, availableHeight);
+        questionIndex += 1;
+        continue;
+      }
+
+      const secondLayout = this.layoutQuestion(doc, secondQuestion, halfHeight);
+
+      if (!secondLayout) {
+        const firstFullLayout = this.layoutQuestion(doc, firstQuestion, availableHeight);
+        if (!firstFullLayout) {
+          throw new BadRequestException(
+            `Câu ${questionIndex + 1} quá dài để xuất gọn trong một trang PDF`,
+          );
+        }
+        this.drawQuestionBlock(
+          doc,
+          firstFullLayout,
+          questionIndex + 1,
+          top,
+          availableHeight,
+        );
+        questionIndex += 1;
+        continue;
+      }
+
+      this.drawQuestionBlock(doc, firstLayout, questionIndex + 1, top, halfHeight);
+      this.drawQuestionBlock(
+        doc,
+        secondLayout,
+        questionIndex + 2,
+        top + halfHeight + QUESTION_BLOCK_GAP,
+        halfHeight,
+      );
+      questionIndex += 2;
+    }
+  }
+
+  private beginQuestionPage(
+    doc: PDFKit.PDFDocument,
+    title: string,
+    firstPage: boolean,
+  ) {
+    if (!firstPage) doc.addPage();
+    this.drawTitle(doc, title);
+    return doc.y;
+  }
+
+  private layoutQuestion(
+    doc: PDFKit.PDFDocument,
+    question: PreparedPdfQuestion,
+    maxHeight: number,
+  ): QuestionLayout | null {
+    const prompt = [
+      question.instruction?.trim(),
+      question.contentText.trim(),
+      ...question.questionParts.map(
+        (part, index) => `${String.fromCharCode(97 + index)}) ${part.contentText}`,
+      ),
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const textWidth = CONTENT_WIDTH - QUESTION_BLOCK_PADDING * 2;
+    const promptLines = this.getTextLines(doc, prompt, textWidth, QUESTION_TEXT_SIZE);
+    const options: OptionLayout[] = question.questionType === QuestionType.MULTIPLE_CHOICE
+      ? (question.questionOptions as PreparedPdfOption[]).map((option, index) => {
+          const lines = this.getTextLines(
+            doc,
+            option.contentText,
+            textWidth - 28,
+            OPTION_TEXT_SIZE,
+          );
+          return {
+            label: LABELS[index] ?? String.fromCharCode(65 + index),
+            lines,
+            height: Math.max(OPTION_LINE_HEIGHT, lines.length * OPTION_LINE_HEIGHT),
+            sourceImage: option.image,
+            image: null,
+          };
+        })
+      : [];
+
+    let fixedHeight =
+      QUESTION_BLOCK_PADDING * 2 +
+      QUESTION_LABEL_HEIGHT +
+      5 +
+      promptLines.length * QUESTION_LINE_HEIGHT;
+    if (question.image) fixedHeight += 8;
+    for (const option of options) {
+      fixedHeight += 5 + option.height;
+      if (option.sourceImage) fixedHeight += 5;
+    }
+
+    const images: Array<{
+      assign: (placement: ImagePlacement) => void;
+      desired: ImagePlacement;
+    }> = [];
+    let questionImage: ImagePlacement | null = null;
+    if (question.image) {
+      const desired = this.fitImage(question.image, textWidth, QUESTION_IMAGE_MAX_HEIGHT);
+      images.push({
+        desired,
+        assign: (placement) => { questionImage = placement; },
+      });
+    }
+    options.forEach((option) => {
+      if (!option.sourceImage) return;
+      const desired = this.fitImage(
+        option.sourceImage,
+        textWidth - 28,
+        OPTION_IMAGE_MAX_HEIGHT,
+      );
+      images.push({
+        desired,
+        assign: (placement) => { option.image = placement; },
+      });
+    });
+
+    const remainingForImages = maxHeight - fixedHeight;
+    if (remainingForImages < 0) return null;
+    const desiredImageHeight = images.reduce((sum, image) => sum + image.desired.height, 0);
+    const scale = desiredImageHeight > 0
+      ? Math.min(1, remainingForImages / desiredImageHeight)
+      : 1;
+    if (
+      images.some(
+        ({ desired }) =>
+          desired.height >= MIN_IMAGE_HEIGHT && desired.height * scale < MIN_IMAGE_HEIGHT,
+      )
+    ) {
+      return null;
+    }
+
+    images.forEach(({ desired, assign }) => {
+      assign({
+        image: desired.image,
+        width: desired.width * scale,
+        height: desired.height * scale,
+      });
+    });
+
+    const imageHeight = images.reduce(
+      (sum, image) => sum + image.desired.height * scale,
+      0,
+    );
+    return { height: fixedHeight + imageHeight, promptLines, questionImage, options };
+  }
+
+  private fitImage(image: PdfImage, maxWidth: number, maxHeight: number): ImagePlacement {
+    const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+    return { image, width: image.width * scale, height: image.height * scale };
+  }
+
+  private drawQuestionBlock(
+    doc: PDFKit.PDFDocument,
+    layout: QuestionLayout,
+    number: number,
+    top: number,
+    blockHeight: number,
+  ) {
+    const contentWidth = CONTENT_WIDTH - QUESTION_BLOCK_PADDING * 2;
+    const verticalOffset = Math.max(0, (blockHeight - layout.height) / 2);
+    let y = top + verticalOffset + QUESTION_BLOCK_PADDING;
+
+    doc.font(this.boldFont).fontSize(12).fillColor('#173b63');
+    this.drawTextLines(
+      doc,
+      [{ text: `Câu ${number}`, indent: 0 }],
+      MARGIN + QUESTION_BLOCK_PADDING,
+      y,
+      QUESTION_LABEL_HEIGHT,
+      12,
+      true,
+    );
+    y += QUESTION_LABEL_HEIGHT + 5;
+
+    doc.font(this.regularFont).fontSize(QUESTION_TEXT_SIZE).fillColor('#202833');
+    y = this.drawTextLines(
+      doc,
+      layout.promptLines,
+      MARGIN + QUESTION_BLOCK_PADDING,
+      y,
+      QUESTION_LINE_HEIGHT,
+      QUESTION_TEXT_SIZE,
+    );
+
+    if (layout.questionImage) {
+      y += 8;
+      doc.image(
+        layout.questionImage.image.buffer,
+        MARGIN + QUESTION_BLOCK_PADDING + (contentWidth - layout.questionImage.width) / 2,
+        y,
+        { width: layout.questionImage.width, height: layout.questionImage.height },
+      );
+      y += layout.questionImage.height;
+    }
+
+    layout.options.forEach((option) => {
+      y += 5;
+      doc.font(this.boldFont).fontSize(OPTION_TEXT_SIZE).fillColor('#283a4e');
+      this.drawTextLines(
+        doc,
+        [{ text: `${option.label}.`, indent: 0 }],
+        MARGIN + QUESTION_BLOCK_PADDING,
+        y,
+        OPTION_LINE_HEIGHT,
+        OPTION_TEXT_SIZE,
+        true,
+      );
+      doc.font(this.regularFont).fontSize(OPTION_TEXT_SIZE).fillColor('#202833');
+      y = this.drawTextLines(
+        doc,
+        option.lines,
+        MARGIN + QUESTION_BLOCK_PADDING + 28,
+        y,
+        OPTION_LINE_HEIGHT,
+        OPTION_TEXT_SIZE,
+      );
+      if (option.image) {
+        y += 5;
+        doc.image(option.image.image.buffer, MARGIN + QUESTION_BLOCK_PADDING + 28, y, {
+          width: option.image.width,
+          height: option.image.height,
+        });
+        y += option.image.height;
+      }
+    });
+  }
+
+  private answerFor(question: PdfQuestion) {
+    if (question.questionType === QuestionType.MULTIPLE_CHOICE) {
+      const index = question.questionOptions.findIndex((option) => option.isCorrect);
+      return index < 0 ? 'Chưa thiết lập đáp án' : LABELS[index] ?? String.fromCharCode(65 + index);
+    }
+    if (question.questionType === QuestionType.MULTI_PART_SHORT_ANSWER) {
+      return question.questionParts.length
+        ? question.questionParts
+            .map((part, index) => `${String.fromCharCode(97 + index)}) ${part.correctAnswer}`)
+            .join('; ')
+        : 'Chưa thiết lập đáp án';
+    }
+    const accepted = question.questionAcceptedAnswers[0];
+    return accepted?.content || accepted?.rawValue || question.correctTextAnswer || 'Tự luận';
   }
 
   private drawTitle(doc: PDFKit.PDFDocument, title: string, subtitle?: string) {
@@ -261,47 +589,6 @@ export class ExamPdfService {
     if (!rows.length) {
       doc.font(this.regularFont).fontSize(10).fillColor('#566273');
       this.writeText(doc, 'Đề thi chưa có câu hỏi.', { width: CONTENT_WIDTH, align: 'center' });
-    }
-  }
-
-  private async drawImage(
-    doc: PDFKit.PDFDocument,
-    imageReference: string | null | undefined,
-    indent = 0,
-  ) {
-    if (!imageReference) return;
-    let image: Buffer;
-    try {
-      image = this.storage.isManagedObjectKey(imageReference)
-        ? await this.storage.download(imageReference)
-        : await this.downloadPublicImage(imageReference);
-      image = await sharp(image, { limitInputPixels: 20_000_000 })
-        .rotate()
-        .png()
-        .toBuffer();
-    } catch {
-      throw new ServiceUnavailableException(
-        'Không thể tải hoặc xử lý ảnh để xuất PDF. Vui lòng kiểm tra ảnh và thử lại.',
-      );
-    }
-
-    try {
-      const opened = (doc as PDFKit.PDFDocument & {
-        openImage: (source: Buffer) => { width: number; height: number };
-      }).openImage(image);
-      const scale = Math.min(
-        (MAX_IMAGE_SIZE.width - indent) / opened.width,
-        MAX_IMAGE_SIZE.height / opened.height,
-        1,
-      );
-      const width = opened.width * scale;
-      const height = opened.height * scale;
-      this.ensureSpace(doc, height + 12);
-      const y = doc.y;
-      doc.image(image, MARGIN + indent, y, { width, height });
-      doc.y = y + height + 10;
-    } catch {
-      this.drawImageNotice(doc, indent);
     }
   }
 
@@ -367,18 +654,108 @@ export class ExamPdfService {
     });
   }
 
-  private drawImageNotice(doc: PDFKit.PDFDocument, indent: number) {
-    this.ensureSpace(doc, 28);
-    doc.font(this.regularFont).fontSize(8).fillColor('#7b8490');
-    this.writeText(doc, '[Ảnh không thể nhúng vào PDF]', {
-      width: CONTENT_WIDTH - indent,
-      indent,
-    });
-    doc.moveDown(0.3);
-  }
-
   private ensureSpace(doc: PDFKit.PDFDocument, height: number) {
     if (doc.y + height > PAGE.height - MARGIN - 20) doc.addPage();
+  }
+
+  private getTextLines(
+    doc: PDFKit.PDFDocument,
+    text: string,
+    width: number,
+    fontSize: number,
+    bold = false,
+  ): TextLine[] {
+    const normalized = (text || '').normalize('NFC');
+    if (!normalized) return [];
+
+    const normalFont = bold ? this.boldFont : this.regularFont;
+    const vietnameseFont = bold ? this.vietnameseBoldFont : this.vietnameseFont;
+    const getFont = (char: string) =>
+      /[\u0100-\u024f\u1e00-\u1eff]/u.test(char)
+        ? vietnameseFont
+        : normalFont;
+    const measure = (value: string) => {
+      let measured = 0;
+      for (const [font, content] of this.fontRuns(value, getFont)) {
+        doc.font(font).fontSize(fontSize);
+        measured += doc.widthOfString(content);
+      }
+      return measured;
+    };
+
+    const lines: TextLine[] = [];
+    for (const paragraph of normalized.split(/\r?\n/)) {
+      const words = paragraph.match(/\S+/gu) ?? [];
+      if (!words.length) {
+        lines.push({ text: '', indent: 0 });
+        continue;
+      }
+
+      let line = '';
+      let lineWidth = 0;
+      for (const word of words) {
+        const wordWidth = measure(word);
+        const separator = line ? ' ' : '';
+        const separatorWidth = separator ? measure(separator) : 0;
+        if (line && lineWidth + separatorWidth + wordWidth > width) {
+          lines.push({ text: line, indent: 0 });
+          line = '';
+          lineWidth = 0;
+        }
+
+        if (wordWidth > width) {
+          for (const char of Array.from(word)) {
+            const charWidth = measure(char);
+            if (line && lineWidth + charWidth > width) {
+              lines.push({ text: line, indent: 0 });
+              line = '';
+              lineWidth = 0;
+            }
+            line += char;
+            lineWidth += charWidth;
+          }
+          continue;
+        }
+
+        if (line) {
+          line += separator;
+          lineWidth += separatorWidth;
+        }
+        line += word;
+        lineWidth += wordWidth;
+      }
+      if (line) lines.push({ text: line, indent: 0 });
+    }
+    return lines;
+  }
+
+  private drawTextLines(
+    doc: PDFKit.PDFDocument,
+    lines: TextLine[],
+    x: number,
+    y: number,
+    lineHeight: number,
+    fontSize: number,
+    bold = false,
+  ) {
+    const normalFont = bold ? this.boldFont : this.regularFont;
+    const vietnameseFont = bold ? this.vietnameseBoldFont : this.vietnameseFont;
+    const getFont = (char: string) =>
+      /[\u0100-\u024f\u1e00-\u1eff]/u.test(char)
+        ? vietnameseFont
+        : normalFont;
+    let cursorY = y;
+    for (const line of lines) {
+      let cursorX = x + line.indent;
+      for (const [font, content] of this.fontRuns(line.text, getFont)) {
+        doc.font(font).fontSize(fontSize).text(content, cursorX, cursorY, {
+          lineBreak: false,
+        });
+        cursorX += doc.widthOfString(content);
+      }
+      cursorY += lineHeight;
+    }
+    return cursorY;
   }
 
   private writeText(
