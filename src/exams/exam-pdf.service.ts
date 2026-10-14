@@ -166,10 +166,9 @@ export class ExamPdfService {
     });
 
     const questions = exam.questions as PdfQuestion[];
-    const preparedQuestions: PreparedPdfQuestion[] = [];
-    for (const question of questions) {
-      preparedQuestions.push(await this.prepareQuestion(doc, question));
-    }
+    const preparedQuestions = await Promise.all(
+      questions.map((question) => this.prepareQuestion(doc, question)),
+    );
     const answerRows: Array<{ number: number; answer: string }> = [];
 
     for (const [index, question] of questions.entries()) {
