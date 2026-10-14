@@ -123,4 +123,14 @@ prisma/                    # Schema, migrations và seed
 docs/                      # API reference và tài liệu kiểm thử
 ```
 
+## Tài liệu dự án & Tri thức Kỹ thuật
+
+Bộ tài liệu toàn diện được tổng hợp từ lịch sử kiến trúc, quyết định kỹ thuật và kiểm toán an ninh của dự án:
+
+- **[Tài liệu Kỹ thuật Tổng quan & Lịch sử Dự án](./docs/CODEX_PROJECT_DOCUMENTATION.md):** Toàn bộ kiến trúc, tiến trình phát triển qua 31 phiên trao đổi, chi tiết các module nghiệp vụ và cẩm nang xử lý sự cố.
+- **[Đặc tả Kỹ thuật Hệ thống Thi Tuần tự V2](./docs/EXAM_V2_SPECIFICATION.md):** Máy trạng thái (State Machine), hợp đồng API, sơ đồ tuần tự và tiêu chuẩn nghiệm thu (Gherkin).
+- **[Kế hoạch Thiết kế Hạ tầng & Dự toán Chi phí](./docs/INFRASTRUCTURE_COST_PLAN.md):** Bảng so sánh AWS EC2 vs Cloud SQL vs Supabase vs Neon, Gmail vs Resend, dự toán chi phí theo tháng kèm file Excel mẫu.
+- **[Báo cáo Kiểm toán An ninh Codex Security](./docs/SECURITY_AUDIT_REPORT.md):** Chi tiết các lỗ hổng phát hiện và các bản vá đã triển khai trong PR #3 (Backend) & PR #2 (Frontend).
+- **[Lưu trữ Lịch sử Hội thoại Codex (31 Phiên)](./docs/codex-history/INDEX.md):** Toàn bộ 929 tin nhắn trao đổi được trích xuất từ SQLite của Codex.
+
 **Frontend:** [CourseManagement_FE](https://github.com/keith1101/CourseManagement_FE).
